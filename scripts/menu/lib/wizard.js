@@ -1,23 +1,58 @@
 import * as p from '@clack/prompts';
-import { isCancel } from '@clack/core';
 import { execSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { readAllManifests, groupByTopic } from './core/manifest-reader.js';
 import { scanAll } from './core/scanner.js';
-import { readSelections, writeSelections, readParams, writeParams, selectionsToMap } from './core/selections-io.js';
+import { readSelections, writeSelections, readParams, writeParams } from './core/selections-io.js';
 import { computeDelta, autoSelectDependencies } from './core/delta.js';
-import { selectTopics, getAlwaysOnTopics } from './screens/topic-selector.js';
-import { selectItems } from './screens/item-selector.js';
+import { runTopicHub } from './screens/topic-hub.js';
 import { promptParams } from './screens/param-prompts.js';
 import { showSummary } from './screens/summary.js';
+import { shortDisplayName } from './ui/format.js';
 
 function detectPlatform() {
   try {
     const menuDir = dirname(new URL(import.meta.url).pathname);
-    const detectScript = join(menuDir, '..', '..', '..', 'lib', 'detect-os.sh');
+    const detectScript = join(menuDir, '..', '..', 'lib', 'detect-os.sh');
     return execSync(`bash "${detectScript}"`, { encoding: 'utf8', timeout: 3_000 }).trim();
   } catch {
     return process.platform === 'darwin' ? 'mac' : 'linux';
+  }
+}
+
+// Prime sudo so install-state checks that need root (systemsetup, plistbuddy,
+// /etc/wsl.conf reads, etc.) succeed during the scan. Guards: (1) skip if
+// no controlling tty (e.g. setup.sh pipes the menu through tee — isTTY
+// reports false even when the user is sitting at a real terminal, see
+// feedback_tty_detection_under_tee_pipe.md); (2) skip if sudo cache is hot;
+// (3) hard timeout so a misconfigured askpass can't block forever.
+function hasCtty() {
+  try {
+    execSync(': </dev/tty >/dev/null 2>&1', { stdio: 'ignore', timeout: 1_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function primeSudo() {
+  if (process.env.MESH_MENU_SKIP_SUDO === '1') return;
+  if (!hasCtty()) return;
+
+  try {
+    execSync('sudo -n -v', { stdio: 'ignore', timeout: 2_000 });
+    return; // already cached
+  } catch {
+    // cold cache → ask once
+  }
+
+  p.log.info('Some install checks need sudo. Enter password (or Ctrl+C to skip):');
+  try {
+    // Bind stdio to /dev/tty so the prompt reaches the user even when
+    // stdout is piped through tee/setup.sh.
+    execSync('sudo -v </dev/tty >/dev/tty 2>/dev/tty', { stdio: 'ignore', timeout: 60_000, shell: '/bin/bash' });
+  } catch {
+    p.log.warn('Continuing without sudo — items that require root to verify may show as not installed.');
   }
 }
 
@@ -32,6 +67,8 @@ export async function runWizard({ dryRun = false, topicsRoot = null, platform = 
 
   p.intro(`mesh setup (${platform})`);
 
+  primeSudo();
+
   const allItems = readAllManifests(topicsRoot, { platform });
   const grouped = groupByTopic(allItems);
 
@@ -43,58 +80,18 @@ export async function runWizard({ dryRun = false, topicsRoot = null, platform = 
   const previousSelections = readSelections() ?? [];
   const previousParams = readParams();
 
-  // Phase 1: topic selection
-  const selectedTopics = await selectTopics(
-    grouped,
-    installedStatus,
-    [...selectionsToMap(previousSelections).keys()],
-  );
-  if (selectedTopics === null) {
+  // Hub-and-spoke: user picks topics to drill into, configures items, returns to hub
+  const hubResult = await runTopicHub(grouped, installedStatus, previousSelections);
+  if (hubResult === null) {
     p.outro('Cancelled.');
     return false;
   }
 
-  // Phase 2: per-topic item selection
-  const allSelectedEntries = [];
+  const { selectedTopics, selectedEntries } = hubResult;
 
-  for (const topic of getAlwaysOnTopics()) {
-    const items = grouped.get(topic);
-    if (!items) continue;
-    for (const item of items) {
-      allSelectedEntries.push(`${item.topic}/${item.name}`);
-    }
-  }
-
-  const optInTopics = selectedTopics.filter((t) => grouped.has(t));
-  for (let i = 0; i < optInTopics.length; i++) {
-    const topic = optInTopics[i];
-    const items = grouped.get(topic);
-    const prevForTopic = previousSelections.filter((e) => e.startsWith(`${topic}/`));
-
-    if (isAllOrNothing(items)) {
-      for (const item of items) {
-        allSelectedEntries.push(`${item.topic}/${item.name}`);
-      }
-      const names = items.map((it) => it.name).join(', ');
-      p.log.step(`${topic}: ${names}`);
-      continue;
-    }
-
-    const selected = await selectItems(topic, items, installedStatus, prevForTopic, {
-      index: i,
-      total: optInTopics.length,
-    });
-
-    if (selected === null) {
-      p.outro('Cancelled.');
-      return false;
-    }
-    allSelectedEntries.push(...selected);
-  }
-
-  const { selected: withDeps, added } = autoSelectDependencies(allItems, allSelectedEntries);
+  const { selected: withDeps, added } = autoSelectDependencies(allItems, selectedEntries);
   if (added.length > 0) {
-    p.log.info(`Auto-selected ${added.length} dep(s): ${added.map(shortName).join(', ')}`);
+    p.log.info(`Auto-selected ${added.length} dep(s): ${added.map(shortDisplayName).join(', ')}`);
   }
 
   // Phase 3: parameters
@@ -124,17 +121,3 @@ export async function runWizard({ dryRun = false, topicsRoot = null, platform = 
   return { selections: withDeps, params, delta };
 }
 
-function isAllOrNothing(items) {
-  if (items.length <= 1) return true;
-  const independentItems = items.filter((item) => {
-    const isDependedOn = items.some((other) => other.requires?.includes(item.name));
-    const hasDeps = item.requires?.length > 0;
-    return !item.required && !isDependedOn && !hasDeps;
-  });
-  return independentItems.length === 0;
-}
-
-function shortName(entry) {
-  const slash = entry.lastIndexOf('/');
-  return slash >= 0 ? entry.slice(slash + 1) : entry;
-}

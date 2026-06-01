@@ -481,6 +481,65 @@ if should_show_menu; then
     fi
 fi
 
+# ---------- Bridge: @clack menu output → legacy INCLUDE_* gates ----------
+# The new menu writes selections.list (one `topic/item` per line) and
+# params.env (KEY=VALUE). Per-topic install.sh + a handful of opt-in
+# extras (mailpit, ngrok, postgres, mssql-driver) still consume the
+# legacy INCLUDE_* env names — this function bridges the two so a tick
+# in the menu actually reaches the engine.
+#
+# Precedence:
+#   - params.env (typed inputs like POSTGRES_VERSION) flows into the
+#     environment first so any later prompt/override can see it.
+#   - INCLUDE_* are set to 1 for every topic that has at least one
+#     selected item, and for the 4 gated extras when their item is
+#     selected. We never set to 0 — a CLI override `INCLUDE_FOO=1
+#     bash setup.sh` still wins over an absent selection.
+#
+# Skip-safe: noop if selections.list doesn't exist (fresh install,
+# legacy whiptail flow, or `mesh` ran the menu via a different path).
+ingest_menu_selections() {
+    local sel="${XDG_CONFIG_HOME:-$HOME/.config}/mesh/selections.list"
+    local par="${XDG_CONFIG_HOME:-$HOME/.config}/mesh/params.env"
+    [[ -f "$sel" ]] || return 0
+
+    if [[ -f "$par" ]]; then
+        set -a
+        # shellcheck disable=SC1090
+        source "$par"
+        set +a
+    fi
+
+    local entry topic item
+    while IFS= read -r entry || [[ -n "$entry" ]]; do
+        # Trim whitespace and skip comments / blank lines.
+        entry="${entry#"${entry%%[![:space:]]*}"}"
+        entry="${entry%"${entry##*[![:space:]]}"}"
+        [[ -z "$entry" || "${entry:0:1}" == "#" ]] && continue
+
+        topic="${entry%%/*}"
+        item="${entry#*/}"
+
+        case "$topic" in
+            45-docker)            export INCLUDE_DOCKER=1 ;;
+            60-web-stack)         export INCLUDE_WEBSTACK=1 ;;
+            70-remote-access)     export INCLUDE_REMOTE=1 ;;
+            82-ai-tools)          export INCLUDE_AI_TOOLS=1 ;;
+            85-code-server)       export INCLUDE_CODE_SERVER=1 ;;
+            90-editor)            export INCLUDE_EDITOR=1 ;;
+            95-dotfiles-personal) export INCLUDE_IDENTITY=1 ;;
+        esac
+
+        case "$item" in
+            mailpit)      export INCLUDE_MAILPIT=1 ;;
+            ngrok)        export INCLUDE_NGROK=1 ;;
+            postgres)     export INCLUDE_POSTGRES=1 ;;
+            mssql-driver) export INCLUDE_MSSQL=1 ;;
+        esac
+    done < "$sel"
+}
+ingest_menu_selections
+
 # ---------- Defaults for inherited vars ----------
 export MESH_IDENTITY_REPO="${MESH_IDENTITY_REPO:-}"
 export MESH_IDENTITY_DIR="${MESH_IDENTITY_DIR:-$HOME/mesh-identity}"

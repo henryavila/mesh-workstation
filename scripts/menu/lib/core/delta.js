@@ -78,6 +78,24 @@ export function autoSelectDependencies(manifest, selectedEntries) {
         }
       }
     }
+
+    // Pull in hidden items whose requires are all currently selected.
+    // Hidden items are implementation details that ride along with a parent.
+    for (const item of manifest) {
+      if (!item.hidden) continue;
+      const entry = `${item.topic}/${item.name}`;
+      if (selected.has(entry)) continue;
+      if (!item.requires?.length) continue;
+      const allMet = item.requires.every((dep) => {
+        const depKey = `${item.topic}/${dep}`;
+        return selected.has(depKey) || selected.has(dep);
+      });
+      if (allMet) {
+        selected.add(entry);
+        added.push(entry);
+        changed = true;
+      }
+    }
   }
 
   return { selected: [...selected], added };

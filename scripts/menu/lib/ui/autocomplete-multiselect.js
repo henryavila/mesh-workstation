@@ -72,17 +72,6 @@ export class AutocompleteMultiselectPrompt extends Prompt {
         case 'down':
           this.cursor = totalRows === 0 ? 0 : (this.cursor + 1) % totalRows;
           break;
-        case 'space':
-          if (this.cursorOnConfirm) {
-            this.value = this._value;
-            this.state = 'submit';
-            this.emit('finalize');
-            this.render();
-            this.close();
-          } else {
-            this._toggle();
-          }
-          break;
       }
     });
 

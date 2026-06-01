@@ -32,19 +32,19 @@ describe('checkItem', () => {
     assert.strictEqual(checkItem(item, { topicsRoot: TOPICS_ROOT }), false);
   });
 
-  it('returns false for git-clone type', () => {
+  it('returns null for git-clone type (marker-only detection)', () => {
     const item = { topic: 'test', name: 'clone', type: 'git-clone', spec: 'repo' };
-    assert.strictEqual(checkItem(item, { topicsRoot: TOPICS_ROOT }), false);
+    assert.strictEqual(checkItem(item, { topicsRoot: TOPICS_ROOT }), null);
   });
 
-  it('returns false for npx type', () => {
+  it('returns null for npx type (marker-only detection)', () => {
     const item = { topic: 'test', name: 'npx', type: 'npx', spec: 'some-pkg' };
-    assert.strictEqual(checkItem(item, { topicsRoot: TOPICS_ROOT }), false);
+    assert.strictEqual(checkItem(item, { topicsRoot: TOPICS_ROOT }), null);
   });
 
-  it('returns false for unknown type', () => {
+  it('returns null for unknown type', () => {
     const item = { topic: 'test', name: 'unknown', type: 'unknown-driver', spec: 'x' };
-    assert.strictEqual(checkItem(item, { topicsRoot: TOPICS_ROOT }), false);
+    assert.strictEqual(checkItem(item, { topicsRoot: TOPICS_ROOT }), null);
   });
 
   it('respects timeout on slow commands', () => {
@@ -69,6 +69,10 @@ describe('scanAll', () => {
     const elapsed = Date.now() - start;
     assert.strictEqual(results.size, 3);
     assert.ok(elapsed < 15_000, `scan should complete in <15s, took ${elapsed}ms`);
+    for (const [, v] of results) {
+      assert.ok(typeof v === 'object' && v !== null, 'scanAll values are rich state objects');
+      assert.ok('installed' in v && 'managed' in v && 'idempotent' in v);
+    }
   });
 
   it('batches brew formula checks', async () => {
@@ -82,7 +86,20 @@ describe('scanAll', () => {
     assert.strictEqual(results.size, 10);
     assert.ok(elapsed < 15_000, `10 brew checks should batch, took ${elapsed}ms`);
     for (const [, v] of results) {
-      assert.strictEqual(v, false);
+      assert.strictEqual(v.installed, false);
+      assert.strictEqual(v.managed, false);
+      assert.strictEqual(v.idempotent, false);
     }
+  });
+
+  it('marks idempotent items without probing', async () => {
+    const items = [
+      { topic: 'test', name: 'idem', type: 'custom', script: './does-not-exist.sh',
+        platforms: ['mac'], check: '', requires: [], idempotent: true },
+    ];
+    const results = await scanAll(items, { topicsRoot: TOPICS_ROOT, platform: 'mac' });
+    const v = results.get('test/idem');
+    assert.strictEqual(v.idempotent, true);
+    assert.strictEqual(v.installed, null);
   });
 });

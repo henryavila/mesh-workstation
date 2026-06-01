@@ -28,14 +28,14 @@ export function parseItemsYaml(content) {
 }
 
 function parseValue(raw) {
-  let v = raw.trim();
+  let v = stripInlineComment(raw).trim();
   if (!v) return '';
 
   if (v.startsWith('[') && v.endsWith(']')) {
     return v
       .slice(1, -1)
       .split(',')
-      .map((s) => s.trim().replace(/^["']|["']$/g, ''))
+      .map((s) => unquote(s.trim()))
       .filter(Boolean);
   }
 
@@ -45,7 +45,48 @@ function parseValue(raw) {
   const num = Number(v);
   if (!Number.isNaN(num) && v !== '') return num;
 
-  return v.replace(/^["']|["']$/g, '');
+  return unquote(v);
+}
+
+// YAML allows `key: value  # comment`. Strip the trailing `#...` so
+// `idempotent: true  # explainer` parses as boolean true, not a string.
+// `#` inside quoted values is preserved (we only strip when the `#` is
+// outside any quote context).
+function stripInlineComment(raw) {
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    const prev = i > 0 ? raw[i - 1] : '';
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle && prev !== '\\') inDouble = !inDouble;
+    else if (ch === '#' && !inSingle && !inDouble) {
+      // `#` only starts a comment if preceded by whitespace or at line start.
+      if (i === 0 || /\s/.test(prev)) return raw.slice(0, i);
+    }
+  }
+  return raw;
+}
+
+function unquote(s) {
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+    // Double-quoted: process backslash escapes per YAML spec
+    return s
+      .slice(1, -1)
+      .replace(/\\(["\\nrt])/g, (_, ch) => {
+        switch (ch) {
+          case 'n': return '\n';
+          case 'r': return '\r';
+          case 't': return '\t';
+          default: return ch;
+        }
+      });
+  }
+  if (s.length >= 2 && s.startsWith("'") && s.endsWith("'")) {
+    // Single-quoted: literal except '' → '
+    return s.slice(1, -1).replace(/''/g, "'");
+  }
+  return s;
 }
 
 export function readTopicManifest(topicDir) {
@@ -67,6 +108,12 @@ export function readTopicManifest(topicDir) {
     post: item.post ?? '',
     rollback: item.rollback ?? '',
     required: item.required === true,
+    hidden: item.hidden === true,
+    // idempotent: the item's install action is safe-to-rerun and has no
+    // stable post-install signal (e.g. config-apply, drift cleanup, font
+    // re-render). Scanner skips probing it and the UI renders a neutral
+    // "re-applies on every run" badge instead of a false "not installed".
+    idempotent: item.idempotent === true,
     uninstall_tier: typeof item.uninstall_tier === 'number' ? item.uninstall_tier : 0,
   }));
 }

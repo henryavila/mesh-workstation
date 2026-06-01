@@ -1,21 +1,22 @@
 import * as p from '@clack/prompts';
 import { isCancel } from '@clack/core';
 import { icons, pc } from '../ui/theme.js';
+import { shortDisplayName } from '../ui/format.js';
 
 export async function showSummary(delta) {
   const { install, remove, keep } = delta;
 
   const lines = [];
   if (install.length > 0) {
-    lines.push(`${pc.green('INSTALL')} (${install.length}):  ${install.map(shortName).join(', ')}`);
+    lines.push(`${pc.green('INSTALL')} (${install.length}):  ${install.map(shortDisplayName).join(', ')}`);
   }
   if (remove.length > 0) {
-    lines.push(`${pc.red('REMOVE')}  (${remove.length}):  ${remove.map(shortName).join(', ')}`);
+    lines.push(`${pc.red('REMOVE')}  (${remove.length}):  ${remove.map(shortDisplayName).join(', ')}`);
   }
   if (keep.length > 0) {
     const display = keep.length <= 8
-      ? keep.map(shortName).join(', ')
-      : keep.slice(0, 6).map(shortName).join(', ') + `, ... +${keep.length - 6}`;
+      ? keep.map(shortDisplayName).join(', ')
+      : keep.slice(0, 6).map(shortDisplayName).join(', ') + `, ... +${keep.length - 6}`;
     lines.push(`${pc.dim('KEEP')}    (${keep.length}):  ${pc.dim(display)}`);
   }
 
@@ -40,7 +41,3 @@ export async function showSummary(delta) {
   return true;
 }
 
-function shortName(entry) {
-  const slash = entry.lastIndexOf('/');
-  return slash >= 0 ? entry.slice(slash + 1) : entry;
-}

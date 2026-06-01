@@ -28,6 +28,10 @@ export const icons = {
   checkboxOff: u('◻', '[ ]'),
   radio: u('●', '>'),
   radioOff: u('○', ' '),
+  // Drift-state icons (added 2026-05-28 alongside marker-based scanner).
+  rerun: u('↻', '~'),       // idempotent: re-runs on every apply
+  foreign: u('◇', '?'),     // installed but no mesh marker (user installed manually)
+  missing: u('▲', '!'),     // selected but not installed (will reinstall)
 };
 
 export const status = {

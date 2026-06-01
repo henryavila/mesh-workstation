@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
-import { formatItemLabel, formatHint, buildLegend, formatTopicHeader } from '../lib/ui/format.js';
+import { formatItemLabel, formatHint, buildLegend, formatTopicHeader, displayName, shortDisplayName } from '../lib/ui/format.js';
 
 describe('formatItemLabel', () => {
   it('shows checkbox + status icon for normal item', () => {
@@ -28,22 +28,40 @@ describe('formatHint', () => {
     assert.strictEqual(formatHint(null, false), '');
   });
 
-  it('shows "deselect to remove" for installed + deselected', () => {
-    const opt = { value: 'x', installed: true, desc: 'A thing' };
+  it('signals removal possibility for installed + managed + deselected (adoptable)', () => {
+    const opt = { value: 'x', installed: true, managed: true, desc: 'A thing' };
     const hint = formatHint(opt, false);
-    assert.ok(hint.includes('deselect to remove'));
+    assert.ok(/installed/.test(hint) && /remove/.test(hint), `expected adoptable hint, got: ${hint}`);
   });
 
-  it('shows "select to install" for available + selected', () => {
-    const opt = { value: 'x', installed: false, desc: 'A thing' };
+  it('signals install action for not-installed + selected (pending)', () => {
+    const opt = { value: 'x', installed: false, managed: false, desc: 'A thing' };
     const hint = formatHint(opt, true);
-    assert.ok(hint.includes('select to install'));
+    assert.ok(/will install/.test(hint), `expected pending hint, got: ${hint}`);
   });
 
-  it('shows "installed" for installed + selected', () => {
-    const opt = { value: 'x', installed: true, desc: 'A thing' };
+  it('signals steady state for installed + managed + selected', () => {
+    const opt = { value: 'x', installed: true, managed: true, desc: 'A thing' };
     const hint = formatHint(opt, true);
     assert.ok(hint.includes('installed'));
+  });
+
+  it('signals foreign install for installed + !managed + deselected', () => {
+    const opt = { value: 'x', installed: true, managed: false, desc: 'A thing' };
+    const hint = formatHint(opt, false);
+    assert.ok(/outside mesh/.test(hint), `expected foreign hint, got: ${hint}`);
+  });
+
+  it('signals drift-out for selected + managed + !installed (missing)', () => {
+    const opt = { value: 'x', installed: false, managed: true, desc: 'A thing' };
+    const hint = formatHint(opt, true);
+    assert.ok(/missing/.test(hint) || /reinstall/.test(hint), `expected missing hint, got: ${hint}`);
+  });
+
+  it('signals idempotent rerun for idempotent + managed', () => {
+    const opt = { value: 'x', idempotent: true, managed: true, installed: null, desc: 'A thing' };
+    const hint = formatHint(opt, true);
+    assert.ok(/idempotent/.test(hint) || /re-applies/.test(hint), `expected idempotent hint, got: ${hint}`);
   });
 
   it('includes desc', () => {
@@ -86,5 +104,39 @@ describe('formatTopicHeader', () => {
     assert.ok(header.includes('1/3'), 'should show 1-based index');
     assert.ok(header.includes('Web Stack'));
     assert.ok(header.includes('7/10'));
+  });
+});
+
+describe('displayName / shortDisplayName (strip platform suffix)', () => {
+  it('strips -mac', () => {
+    assert.strictEqual(displayName('mysql-mac'), 'mysql');
+    assert.strictEqual(displayName('mosh-path-mac'), 'mosh-path');
+  });
+
+  it('strips -wsl', () => {
+    assert.strictEqual(displayName('atuin-wsl'), 'atuin');
+    assert.strictEqual(displayName('tailscale-mtu-fix-wsl'), 'tailscale-mtu-fix');
+  });
+
+  it('strips -linux', () => {
+    assert.strictEqual(displayName('moshi-hook-linux'), 'moshi-hook');
+  });
+
+  it('leaves names without platform suffix untouched', () => {
+    assert.strictEqual(displayName('valet'), 'valet');
+    assert.strictEqual(displayName('code-server'), 'code-server');
+    assert.strictEqual(displayName('docker-compose'), 'docker-compose');
+  });
+
+  it('handles edge inputs', () => {
+    assert.strictEqual(displayName(''), '');
+    assert.strictEqual(displayName(null), '');
+    assert.strictEqual(displayName(undefined), '');
+  });
+
+  it('shortDisplayName strips topic prefix and platform suffix', () => {
+    assert.strictEqual(shortDisplayName('60-web-stack/mysql-mac'), 'mysql');
+    assert.strictEqual(shortDisplayName('80-claude-code/moshi-hook-linux'), 'moshi-hook');
+    assert.strictEqual(shortDisplayName('valet'), 'valet');
   });
 });
