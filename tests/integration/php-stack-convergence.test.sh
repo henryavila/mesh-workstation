@@ -322,7 +322,8 @@ SH
 case "${1:-}" in
     -m)
         printf 'Core\n'
-        if [[ "${PECL_FAKE_ALREADY_LOADED:-0}" == "1" ]]; then
+        if [[ "${PECL_FAKE_ALREADY_LOADED:-0}" == "1" ]] \
+            || [[ -n "${PECL_FAKE_STATE_DIR:-}" && -f "${PECL_FAKE_STATE_DIR}/redis.loaded" ]]; then
             printf 'redis\n'
         fi
         exit 0
@@ -367,9 +368,26 @@ case "${PECL_FAKE_MODE:-installed}" in
         ;;
 esac
 SH
-    cat > "$fakebin/phpenmod" <<SH
+    cat > "$fakebin/phpenmod" <<'SH'
 #!/usr/bin/env bash
-printf '%s\n' "\$*" >> "$root/phpenmod.log"
+printf '%s\n' "$*" >> "$PECL_FAKE_STATE_DIR/phpenmod.log"
+case "${PECL_FAKE_PHPENMOD_MODE:-loaded}" in
+    fail)
+        exit 23
+        ;;
+    absent)
+        exit 0
+        ;;
+    loaded)
+        ext=""
+        for arg in "$@"; do ext="$arg"; done
+        : > "$PECL_FAKE_STATE_DIR/${ext}.loaded"
+        exit 0
+        ;;
+    *)
+        exit 64
+        ;;
+esac
 SH
     chmod +x "$fakebin/sudo" "$fakebin/php8.5" "$fakebin/phpize8.5" \
         "$fakebin/php-config8.5" "$fakebin/pecl" "$fakebin/phpenmod"
@@ -395,9 +413,18 @@ run_wsl_pecl_helper_case() {
             PECL_FAKE_NO_API=1
             export PECL_FAKE_NO_API
             ;;
+        phpenmod-fail)
+            PECL_FAKE_PHPENMOD_MODE=fail
+            export PECL_FAKE_PHPENMOD_MODE
+            ;;
+        module-absent)
+            PECL_FAKE_PHPENMOD_MODE=absent
+            export PECL_FAKE_PHPENMOD_MODE
+            ;;
     esac
 
     PECL_FAKE_MODE="$mode" \
+    PECL_FAKE_STATE_DIR="$root" \
     PATH="$fakebin:$PATH" \
     PECL_INSTALL_BIN_DIR="$fakebin" \
     PECL_INSTALL_EXTENSION_ROOT="$root/extensions" \
@@ -423,12 +450,14 @@ run_wsl_pecl_helper_case() {
     assert_contains "$status" "converged=$expected_converged" \
         "WSL PECL helper convergence flag for $expected_result"
 
-    unset PECL_FAKE_ALREADY_LOADED PECL_FAKE_NO_API
+    unset PECL_FAKE_ALREADY_LOADED PECL_FAKE_NO_API PECL_FAKE_PHPENMOD_MODE
     rm -rf "$root"
 }
 
 run_platform_wsl_pecl_status() {
     run_wsl_pecl_helper_case installed installed 1
+    run_wsl_pecl_helper_case installed failed-phpenmod 0 phpenmod-fail
+    run_wsl_pecl_helper_case installed failed-not-loaded 0 module-absent
     run_wsl_pecl_helper_case missing-so failed-missing-so 0
     run_wsl_pecl_helper_case build-fail failed-build 0
     run_wsl_pecl_helper_case installed skipped-missing-binary 0 missing-binary
@@ -467,6 +496,14 @@ case "\${1:-}" in
     -v)
         if [[ "\${PHP_FAKE_STARTUP_DIRTY:-}" == "$ver" ]]; then
             printf 'PHP Startup: Unable to load dynamic library redis.so\n' >&2
+        fi
+        if [[ "\${PHP_FAKE_STARTUP_WARNING:-}" == "$ver" ]]; then
+            printf '%s\n' \
+                'PHP Warning: Module "redis" is already loaded in Unknown on line 0' \
+                'diagnostic line 2' \
+                'diagnostic line 3' \
+                'diagnostic line 4' \
+                'diagnostic line 5' >&2
         fi
         printf 'PHP ${ver}.0 fixture\n'
         exit 0
@@ -524,6 +561,27 @@ run_platform_wsl_verify() {
     fi
     assert_contains "$out" "PHP Startup: Unable to load dynamic library redis.so" \
         "WSL verify surfaces PHP startup warnings"
+
+    out="$(
+        env \
+            PATH="$fakebin:$PATH" \
+            PHP_CLI_BIN_DIR="$fakebin" \
+            PHP_VERSIONS="8.4 8.5" \
+            PHP_FAKE_STARTUP_WARNING="8.5" \
+            bash -c 'source "$1"; verify' _ "$WSL_STACK" 2>&1
+    )"
+    rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        pass "WSL verify fails when php<ver> writes any diagnostic to stderr"
+    else
+        fail "WSL verify accepted a non-library PHP startup diagnostic"
+    fi
+    assert_contains "$out" 'PHP Warning: Module "redis" is already loaded in Unknown on line 0' \
+        "WSL verify surfaces the alternate PHP startup diagnostic"
+    assert_contains "$out" "diagnostic line 4" \
+        "WSL verify surfaces at most the first four stderr lines"
+    assert_not_contains "$out" "diagnostic line 5" \
+        "WSL verify suppresses PHP startup diagnostics after four lines"
 
     out="$(
         env \

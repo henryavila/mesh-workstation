@@ -163,7 +163,23 @@ pecl_install_for_version_linux() {
         sudo mkdir -p "$ini_dir"
         echo "extension=${ext}.so" | sudo tee "$ini_file" >/dev/null
     fi
-    sudo phpenmod -v "$ver" "$ext" >/dev/null 2>&1 || true
+    local phpenmod_rc=0
+    sudo phpenmod -v "$ver" "$ext" >/dev/null 2>&1 || phpenmod_rc=$?
+    if [[ "$phpenmod_rc" -ne 0 ]]; then
+        warn "PHP $ver: phpenmod failed for $ext (exit=$phpenmod_rc)"
+        _pecl_install_set_status "failed-phpenmod" 0 "exit=$phpenmod_rc" "$so_path"
+        return 0
+    fi
+
+    local modules="" module_rc=0
+    modules="$("$php_bin" -m 2>/dev/null)" || module_rc=$?
+    if [[ "$module_rc" -ne 0 ]] \
+        || ! grep -qiE "^${ext}\$|^${ext//pdo_/PDO_}\$" <<< "$modules"; then
+        warn "PHP $ver: $ext is not loaded after phpenmod (php -m exit=$module_rc)"
+        _pecl_install_set_status "failed-not-loaded" 0 "php-m-exit=$module_rc" "$so_path"
+        return 0
+    fi
+
     ok "PHP $ver: $ext enabled"
     _pecl_install_set_status "installed" 1 "" "$so_path"
 }

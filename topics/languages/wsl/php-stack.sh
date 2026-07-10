@@ -46,12 +46,12 @@ _php_cli_starts_clean() {
     "$php_bin" -v >"$tmp/out" 2>"$tmp/err"; rc=$?
     cat "$tmp/out" "$tmp/err" > "$tmp/all"
     if [[ "$rc" -ne 0 ]]; then
-        cat "$tmp/all" >&2
+        sed -n '1,4p' "$tmp/all" >&2
         rm -rf "$tmp"
         return 1
     fi
-    if grep -q 'PHP Startup: Unable to load dynamic library' "$tmp/all"; then
-        grep 'PHP Startup: Unable to load dynamic library' "$tmp/all" | head -4 >&2
+    if [[ -s "$tmp/err" ]]; then
+        sed -n '1,4p' "$tmp/err" >&2
         rm -rf "$tmp"
         return 1
     fi
