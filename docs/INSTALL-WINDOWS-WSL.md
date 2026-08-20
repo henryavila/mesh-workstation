@@ -207,7 +207,27 @@ degraded. Setup records this as a **critical followup** in the end-of-run summar
 
 ---
 
-## 6. Troubleshooting
+## 6. Local HTTPS (`*.localhost`)
+
+The web bundle's mkcert step is supposed to import the CA into the Windows
+store so Chrome/Edge trust `https://<name>.localhost`. That import is
+best-effort over WSL interop; a green WSL install can still leave Windows
+browsers at `NET::ERR_CERT_AUTHORITY_INVALID`.
+
+Canonical write-up: [topics/web/README.md — HTTPS that works](../topics/web/README.md#https-that-works--including-from-windows-browsers).
+
+From this clone:
+
+```bash
+bash topics/web/scripts/diagnose-wsl-interop.sh
+```
+
+Run the printed PowerShell command **on Windows**, then fully quit and reopen
+the browser. Do not install a certificate by hand.
+
+---
+
+## 7. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
@@ -218,12 +238,14 @@ degraded. Setup records this as a **critical followup** in the end-of-run summar
 | Glyphs broken in Terminal | Fonts bundle not applied yet | `bash setup.sh --bundle shell-terminal/fonts` |
 | `mesh services` / docker odd on WSL | systemd not live yet | `wsl --shutdown` from Windows, reopen Ubuntu |
 | Personal identity missing after headless run | Soft-skip without `MESH_IDENTITY_REPO` | `MESH_IDENTITY_REPO=you/repo bash setup.sh` or interactive re-run |
+| Windows Chrome/Edge: `NET::ERR_CERT_AUTHORITY_INVALID` on `https://*.localhost` | mkcert CA missing from the Windows store (WSL interop import skipped or failed) | From the clone: `bash topics/web/scripts/diagnose-wsl-interop.sh`. Run the printed PowerShell command **on Windows**, then fully quit and reopen the browser. Do not install a cert by hand. |
 
 ---
 
-## 7. Related docs
+## 8. Related docs
 
 - [SPEC.md](SPEC.md) §2 usage flow, §4 selection / `--no-mesh`
 - [SERVICES.md](SERVICES.md) — `mesh services` backends (systemd on WSL)
 - [CLEAN.md](CLEAN.md) — disk reclaim + WSL VHDX compaction handoff
 - [TMUX.md](TMUX.md) — terminal multiplexer cheat-sheet (after shell-terminal lands)
+- [topics/web/README.md](../topics/web/README.md) — `*.localhost` HTTPS, mkcert, Windows CA import / `diagnose-wsl-interop.sh`

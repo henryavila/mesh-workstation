@@ -80,6 +80,33 @@ The WSL installer:
 
 **Firefox users** on Windows: set `security.enterprise_roots.enabled = true` in `about:config`. Firefox reads the Windows store only when that flag is on.
 
+### Symptom: Windows Chrome/Edge rejects `*.localhost`
+
+`NET::ERR_CERT_AUTHORITY_INVALID` on `https://foo.localhost` after a successful
+WSL web install. curl inside Ubuntu may already be fine. Do **not** install a
+certificate by hand and do not edit `C:\Windows\System32\drivers\etc\hosts`.
+
+### Cause
+
+Windows browsers consult the **Windows** store, not WSL's. The mkcert item
+imports `rootCA.pem` into `HKCU:\Root` via `powershell.exe` from Linux
+(best-effort). Corporate WSL often has broken binfmt/9P, so that call times
+out. `check()` does not verify the Windows store, so `mesh doctor --fix` can
+report healthy while Chrome still rejects the cert.
+
+### Fix
+
+From this clone (repo-relative — do not hardcode a home path):
+
+```bash
+bash topics/web/scripts/diagnose-wsl-interop.sh
+```
+
+The script probes interop and **always prints the exact Windows PowerShell
+command** for `import-mkcert-from-windows.ps1` (Lane B: `wsl.exe` from Windows,
+independent of binfmt). Run that printed line in Windows PowerShell, then fully
+quit and reopen the browser.
+
 ## The two catchalls
 
 | Host pattern | Backend | Use case |
@@ -236,7 +263,7 @@ link-project --list
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `NET::ERR_CERT_AUTHORITY_INVALID` in Chrome/Edge on Windows | mkcert CA not imported into Windows store | Re-run `install.wsl.sh` — the PowerShell step will import if missing |
+| `NET::ERR_CERT_AUTHORITY_INVALID` in Chrome/Edge on Windows | mkcert CA not imported into Windows store | `bash topics/web/scripts/diagnose-wsl-interop.sh` — run the printed PowerShell command on Windows, then restart the browser |
 | Firefox keeps showing cert error | Firefox ignores Windows store by default | Set `security.enterprise_roots.enabled = true` in `about:config` |
 | `php -m` doesn't show sqlsrv after MSSQL install | PECL build hit a missing `php{VER}-dev` header | `sudo apt install php{VER}-dev && sudo pecl install -f sqlsrv` |
 | `*.localhost` works in browser but `curl foo.localhost` fails | curl linked against a libc that doesn't follow RFC 6761 (rare) | Add `127.0.0.1 foo.localhost` to `/etc/hosts` manually (only for that edge case) |

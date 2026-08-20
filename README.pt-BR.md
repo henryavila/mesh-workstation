@@ -150,6 +150,24 @@ Cada topic tem o próprio `README.md` (exceto dirs finos de membership que
 apontam pro manifesto). Bundles em `topics/*/manifest.yaml`; o engine aplica
 itens selecionados e faz deploy de `topics/<id>/templates/`.
 
+## HTTPS `*.localhost` no Windows
+
+Bloco canónico (sintoma / causa / fix):
+[`topics/web/README.md` — HTTPS that works](topics/web/README.md#https-that-works--including-from-windows-browsers).
+
+**Sintoma:** Chrome/Edge no Windows com `NET::ERR_CERT_AUTHORITY_INVALID` em
+`https://<projeto>.localhost` depois do install. Não instale o certificado à
+mão.
+
+**Fix** — no clone:
+
+```bash
+bash topics/web/scripts/diagnose-wsl-interop.sh
+```
+
+Imprime o comando exacto de PowerShell (lado Windows) para importar a CA mkcert.
+Rode essa linha no Windows, feche o browser por completo e reabra.
+
 ## Env vars e flags CLI
 
 Primariamente para automação / CI — o menu interativo preenche essas vars pro uso humano. Qualquer env var pré-existente vence os defaults do menu.

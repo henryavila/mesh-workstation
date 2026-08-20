@@ -25,6 +25,29 @@ assert_file_contains "$README_PT" 'docs/INSTALL-WINDOWS-WSL.md' "README.pt-BR li
 assert_file_contains "$README" 'lean bootstrap' "README mentions lean bootstrap"
 assert_file_contains "$README_PT" 'lean bootstrap' "README.pt-BR mentions lean bootstrap"
 
+# Windows *.localhost TLS: repo-relative diagnose script, not a hand-built cert.
+WEB_README="$WS/topics/web/README.md"
+DIAG_REL='topics/web/scripts/diagnose-wsl-interop.sh'
+assert_file_contains "$GUIDE" "$DIAG_REL" \
+    "install guide documents diagnose-wsl-interop.sh"
+assert_file_contains "$README" "$DIAG_REL" \
+    "README documents diagnose-wsl-interop.sh"
+assert_file_contains "$README_PT" "$DIAG_REL" \
+    "README.pt-BR documents diagnose-wsl-interop.sh"
+assert_file_contains "$WEB_README" "$DIAG_REL" \
+    "web README documents diagnose-wsl-interop.sh"
+assert_file_contains "$WEB_README" 'Symptom: Windows Chrome/Edge rejects' \
+    "web README keeps the *.localhost TLS problem block (symptom/cause/fix)"
+assert_file_contains "$GUIDE" 'Local HTTPS' \
+    "install guide has a Local HTTPS (*.localhost) section"
+assert_pattern_absent "$WEB_README" 'install\.wsl\.sh' \
+    "web README does not send cert repair to stale install.wsl.sh"
+for f in "$GUIDE" "$README" "$README_PT" "$WEB_README"; do
+    rel="${f#"$WS"/}"
+    assert_pattern_absent "$f" '~/mesh-workstation/topics/web/scripts/diagnose-wsl-interop' \
+        "$rel diagnose path is not ~/mesh-workstation/..."
+done
+
 # Entrypoint next-steps must not resurrect the renamed repo / entrypoint.
 if grep -nE 'dev-bootstrap|bootstrap\.sh' "$PS1" >/dev/null 2>&1; then
     fail "windows/install-wsl.ps1 must not mention dev-bootstrap or bootstrap.sh"

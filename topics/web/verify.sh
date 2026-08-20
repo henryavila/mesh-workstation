@@ -73,7 +73,7 @@ done
 if [[ -f /etc/nginx/certs/wildcard-localhost.pem ]]; then
     echo "  ✓ wildcard cert present"
 else
-    echo "  ! wildcard cert missing — run install.wsl.sh to generate"
+    echo "  ! wildcard cert missing — run: bash setup.sh --bundle web/nginx-php-fpm"
 fi
 
 # ─── Opt-in extras (only report if intended/installed) ───────────────

@@ -3,9 +3,10 @@
 # isn't reachable from WSL, which blocks the Windows CA import step
 # (Chrome/Edge on Windows won't trust *.localhost HTTPS without it).
 #
-# Run this manually when 60-web-stack prints the "Windows CA import
-# skipped" critical follow-up. It checks 6 points in order and prints
-# a one-line diagnosis with the most probable fix at the end.
+# Run this when Windows Chrome/Edge shows NET::ERR_CERT_AUTHORITY_INVALID
+# on https://*.localhost, or when setup printed a "Windows CA import
+# skipped" follow-up. It checks 6 interop points and always prints the
+# exact Windows PowerShell command that imports the mkcert CA (Lane B).
 
 set -uo pipefail
 
@@ -150,27 +151,33 @@ banner "Diagnosis"
 # not through binfmt_misc. We print it first so the user always has a
 # working path, regardless of which check failed.
 DISTRO_NAME="${WSL_DISTRO_NAME:-$(lsb_release -si 2>/dev/null || echo Ubuntu)}"
-SCRIPT_UNC="\\\\wsl.localhost\\${DISTRO_NAME}$(dirname "$0" | sed 's|/|\\|g')\\import-mkcert-from-windows.ps1"
+# $HERE is already an absolute WSL path, so the UNC is valid even when this
+# script was invoked with a relative path (bash topics/web/scripts/...).
+SCRIPT_UNC="\\\\wsl.localhost\\${DISTRO_NAME}$(printf '%s' "$HERE" | sed 's|/|\\|g')\\import-mkcert-from-windows.ps1"
+
+echo
+info "ROBUST SOLUTION — Windows CA import (works even when WSL interop is dead):"
+info "  Open Windows PowerShell (on Windows side) and run:"
+info "    powershell -ExecutionPolicy Bypass -File '${SCRIPT_UNC}'"
+info "  -ExecutionPolicy Bypass is scoped to THIS invocation only —"
+info "  needed because PowerShell refuses unsigned scripts over UNC by default."
+info "  The script uses 'wsl.exe cat' which bypasses binfmt/interop"
+info "  entirely — it reaches the WSL VM through a different channel."
+info "  Then fully quit Chrome/Edge and reopen before retrying https://*.localhost."
+echo
 
 if [[ -n "$FIRST_FAIL" ]]; then
     fail "Interop check '${FIRST_FAIL}' failed."
-    echo
-    info "ROBUST SOLUTION — always works regardless of interop state:"
-    info "  Open Windows PowerShell (on Windows side) and run:"
-    info "    powershell -ExecutionPolicy Bypass -File '${SCRIPT_UNC}'"
-    info "  -ExecutionPolicy Bypass is scoped to THIS invocation only —"
-    info "  needed because PowerShell refuses unsigned scripts over UNC by default."
-    info "  The script uses 'wsl.exe cat' which bypasses binfmt/interop"
-    info "  entirely — it reaches the WSL VM through a different channel."
     echo
     info "Optional first-aid (fixes the interop itself, but recurrence is possible):"
 fi
 
 case "$FIRST_FAIL" in
     "")
-        ok "All checks passed — interop looks healthy. If the bootstrap still"
-        ok "refuses to do the Windows CA import, re-run:"
-        ok "  ONLY_TOPICS=60-web-stack bash ~/mesh-workstation/setup.sh"
+        ok "All checks passed — interop looks healthy. If Windows browsers still"
+        ok "reject *.localhost TLS, run the PowerShell command above (do not re-run"
+        ok "setup just for the cert). To re-apply the web bundle from the clone:"
+        ok "  bash setup.sh --bundle web/nginx-php-fpm"
         ;;
     "mnt-c-9p-broken"|"mnt-c-unavailable")
         fail "  /mnt/c 9P mount is broken in this WSL session."

@@ -147,6 +147,7 @@ for runtime repair.
 | Condition | Supported command | What it does |
 |---|---|---|
 | Broken PHP, Valet, nginx, or php-fpm runtime | `mesh doctor --fix` | Verifies installed owners with their strongest probes, repairs broken owners, and returns nonzero if any remain unresolved. |
+| Windows Chrome/Edge rejects `*.localhost` TLS (`NET::ERR_CERT_AUTHORITY_INVALID`) | `bash topics/web/scripts/diagnose-wsl-interop.sh` | Probes WSL interop and prints the exact Windows PowerShell command to import the mkcert CA (works when interop is broken). Run that printed line on Windows, then restart the browser. |
 | New owner on an upgraded marker-owned bundle | `mesh doctor --fix` | Adopts the owner if its probe is already healthy; otherwise repairs, re-verifies, and records it. This is the supported upgrade path on an existing host. |
 | Complete reapply of the saved selection after pulling changes | `mesh update --full` | Runs the full apply instead of only the last-applied diff. |
 | Update while intentionally tracking a non-`main` branch | `mesh update --force` | Bypasses only the branch gate; dirty trees and unpushed commits are still refused. |
