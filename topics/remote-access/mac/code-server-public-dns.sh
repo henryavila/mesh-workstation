@@ -302,6 +302,86 @@ PY
     return 0
 }
 
+# Separate arguments only, in this order:
+#   tailscale funnel --bg --yes --tcp=443 tcp://127.0.0.1:8092
+# A single joined string is rejected. Any argument containing
+# --tls-terminated-tcp is rejected. This does not exec tailscale.
+funnel_argv_is_allowed() {
+    local arg
+    for arg in "$@"; do
+        case "$arg" in
+            *--tls-terminated-tcp*) return 1 ;;
+        esac
+    done
+    [[ $# -eq 6 ]] || return 1
+    [[ "$1" == "tailscale" ]] || return 1
+    [[ "$2" == "funnel" ]] || return 1
+    [[ "$3" == "--bg" ]] || return 1
+    [[ "$4" == "--yes" ]] || return 1
+    [[ "$5" == "--tcp=443" ]] || return 1
+    [[ "$6" == "tcp://127.0.0.1:8092" ]] || return 1
+    return 0
+}
+
+# Prints snapshot=ok/lost. Exit 0 only when every top-level TCP key and every
+# top-level Web key in SERVE_BEFORE is still present in SERVE_AFTER.
+# A new key is not a loss. Values are not compared. Port 443 is not required
+# and is not added. Foreground session ids are not compared. Missing or
+# invalid JSON is a loss. This does not exec tailscale.
+serve_snapshot_keeps_handlers() {
+    local result py_rc
+    if ! command -v python3 >/dev/null 2>&1; then
+        printf 'snapshot=lost\n'
+        return 1
+    fi
+    py_rc=0
+    result="$(
+        SERVE_BEFORE="${SERVE_BEFORE-}" SERVE_AFTER="${SERVE_AFTER-}" python3 - <<'PY'
+import json
+import os
+
+def section_keys(node, field):
+    if field not in node or node[field] is None:
+        return set()
+    section = node[field]
+    if not isinstance(section, dict):
+        return None
+    keys = set()
+    for key in section:
+        if not isinstance(key, str):
+            return None
+        keys.add(key)
+    return keys
+
+def kept(before, after):
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return False
+    for field in ("TCP", "Web"):
+        old = section_keys(before, field)
+        new = section_keys(after, field)
+        if old is None or new is None or not old <= new:
+            return False
+    return True
+
+def main():
+    try:
+        before = json.loads(os.environ.get("SERVE_BEFORE", ""))
+        after = json.loads(os.environ.get("SERVE_AFTER", ""))
+    except Exception:
+        return False
+    return kept(before, after)
+
+print("ok" if main() else "lost")
+PY
+    )" || py_rc=$?
+    if [[ "$py_rc" -ne 0 || "$result" != "ok" ]]; then
+        printf 'snapshot=lost\n'
+        return 1
+    fi
+    printf 'snapshot=ok\n'
+    return 0
+}
+
 # Without --resolve this is not a public probe. Never exec curl.
 public_probe() {
     local arg saw=0
@@ -440,6 +520,16 @@ main() {
             ;;
         funnel-check)
             serve_json_is_our_funnel
+            ;;
+        funnel-argv)
+            if funnel_argv_is_allowed "$@"; then
+                return 0
+            fi
+            printf 'funnel-argv=rejected\n'
+            return 1
+            ;;
+        snapshot-check)
+            serve_snapshot_keeps_handlers
             ;;
         probe)
             probe "$@"
