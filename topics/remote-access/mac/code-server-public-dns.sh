@@ -9,9 +9,9 @@
 # are dig failures and win over every address check.
 #
 # Rejected, not globally routable: 0/8, 10/8, 100.64/10, 127/8, 169.254/16,
-# 172.16/12, 192.0.2/24, 192.168/16, 198.18/15, 224.0.0.0/4, 255.255.255.255.
-# Addresses just outside those ranges stay routable. 240.0.0.0/4 is not rejected
-# except for the limited broadcast above.
+# 172.16/12, 192.0.2/24, 192.168/16, 198.18/15, 198.51.100.0/24, 203.0.113.0/24,
+# 224.0.0.0/4, 240.0.0.0/4 (first octet >= 240, including 255.255.255.255).
+# Addresses just outside those ranges stay routable.
 
 _csp_trim() {
     local s="$1"
@@ -22,7 +22,7 @@ _csp_trim() {
 
 _csp_parse_a() {
     local raw="$1"
-    local trimmed tok noglob=0
+    local trimmed tok noglob=0 canon="" canon_rc=0
     local -a toks=()
 
     trimmed="$(_csp_trim "$raw")"
@@ -56,8 +56,19 @@ _csp_parse_a() {
         _csp_kind="empty"
         return 0
     fi
+    # pipefail applies only inside this substitution. A failing sort must not
+    # become an empty canon and then look like a public answer. set -u stays on.
+    canon="$(
+        set -u -o pipefail
+        printf '%s\n' "${toks[@]}" | LC_ALL=C sort -u
+    )" || canon_rc=$?
+    if [[ "$canon_rc" -ne 0 ]]; then
+        _csp_kind="failure"
+        _csp_canon=""
+        return 0
+    fi
     _csp_kind="addrs"
-    _csp_canon="$(printf '%s\n' "${toks[@]}" | LC_ALL=C sort -u)"
+    _csp_canon="$canon"
     return 0
 }
 
@@ -101,10 +112,16 @@ _csp_routable() {
     if (( o1 == 198 && o2 >= 18 && o2 <= 19 )); then
         return 1
     fi
+    if (( o1 == 198 && o2 == 51 && o3 == 100 )); then
+        return 1
+    fi
+    if (( o1 == 203 && o2 == 0 && o3 == 113 )); then
+        return 1
+    fi
     if (( o1 >= 224 && o1 <= 239 )); then
         return 1
     fi
-    if (( o1 == 255 && o2 == 255 && o3 == 255 && o4 == 255 )); then
+    if (( o1 >= 240 )); then
         return 1
     fi
     return 0
@@ -160,19 +177,15 @@ _csp_classify_body() {
         return $?
     fi
 
-    flags="$(_csp_addr_flags "$canon1" "$egress")$(_csp_addr_flags "$canon2" "$egress")"
-    case "$flags" in
-        *bad*)
-            _csp_finish unpublished 2
-            return $?
-            ;;
-    esac
+    # Compare sets before routability. Unequal non-empty answers disagree even
+    # when a token is rejected, non-IPv4, or the egress address.
     if [[ "$canon1" != "$canon2" ]]; then
         _csp_finish disagreement 3
         return $?
     fi
+    flags="$(_csp_addr_flags "$canon1" "$egress")"
     case "$flags" in
-        *egress*)
+        *bad*|*egress*)
             _csp_finish unpublished 2
             return $?
             ;;
@@ -188,6 +201,8 @@ classify_public_name() {
 }
 
 # Prints funnel=yes/no. Exit 0 only for our raw TCP/443 funnel stanza.
+# A foreground config that names port 443 (TCP["443"] or a Web key ending
+# in :443) replaces the top-level object. More than one such config conflicts.
 serve_json_is_our_funnel() {
     local dns json result py_rc
     dns="${CODE_SERVER_PUBLIC_DNS_NAME:-mac-mini-m4-de-henry.bream-goldeye.ts.net}"
@@ -202,13 +217,36 @@ serve_json_is_our_funnel() {
 import json
 import os
 
-def main():
-    raw = os.environ.get("SERVE_JSON", "")
-    name = os.environ.get("CODE_SERVER_PUBLIC_DNS_NAME", "")
-    try:
-        data = json.loads(raw)
-    except Exception:
+def _web_has_443(web):
+    if not isinstance(web, dict):
         return False
+    for key in web:
+        if isinstance(key, str) and key.endswith(":443"):
+            return True
+    return False
+
+def _mentions_443(cfg):
+    if not isinstance(cfg, dict):
+        return False
+    tcp = cfg.get("TCP")
+    if isinstance(tcp, dict) and "443" in tcp:
+        return True
+    return _web_has_443(cfg.get("Web"))
+
+def _effective_443(data):
+    fg = data.get("Foreground")
+    if fg is None:
+        return data
+    if not isinstance(fg, dict):
+        return None
+    hits = [cfg for cfg in fg.values() if _mentions_443(cfg)]
+    if len(hits) > 1:
+        return None
+    if len(hits) == 1:
+        return hits[0]
+    return data
+
+def _is_our_funnel(data, name):
     if not isinstance(data, dict):
         return False
     tcp = data.get("TCP")
@@ -235,10 +273,23 @@ def main():
         return True
     if not isinstance(web, dict):
         return False
-    for key in web:
-        if isinstance(key, str) and key.endswith(":443"):
-            return False
+    if _web_has_443(web):
+        return False
     return True
+
+def main():
+    raw = os.environ.get("SERVE_JSON", "")
+    name = os.environ.get("CODE_SERVER_PUBLIC_DNS_NAME", "")
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return False
+    if not isinstance(data, dict):
+        return False
+    effective = _effective_443(data)
+    if effective is None:
+        return False
+    return _is_our_funnel(effective, name)
 
 print("yes" if main() else "no")
 PY

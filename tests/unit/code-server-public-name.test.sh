@@ -8,10 +8,21 @@ source "$HERE/../lib/assert.sh"
 
 SCRIPT="$WS/topics/remote-access/mac/code-server-public-dns.sh"
 DNS_NAME="mac-mini-m4-de-henry.bream-goldeye.ts.net"
-EGRESS="198.51.100.200"
+EGRESS="9.9.9.9"
 PROBE="100.71.187.99"
 
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/code-server-public-name.XXXXXX")"
+# Fail closed before trap and before any "$TMP/..." path. A broken mktemp
+# must not leave TMP empty and fall through into /bin or the rest of the suite.
+csp_acquire_tmp() {
+    local rc=0
+    TMP="$(mktemp -d "${TMPDIR:-/tmp}/code-server-public-name.XXXXXX")" || rc=$?
+    if [[ "$rc" -ne 0 || -z "${TMP:-}" || ! -d "${TMP:-}" ]]; then
+        printf 'error: mktemp failed to create a temp directory\n' >&2
+        exit 1
+    fi
+}
+
+csp_acquire_tmp
 trap 'rm -rf "$TMP"' EXIT
 
 TAILNET_JSON='{"TCP":{"443":{"HTTPS":true}},"Web":{"mac-mini-m4-de-henry.bream-goldeye.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8080"}}}}}'
@@ -51,7 +62,7 @@ expect_classify() {
 # --- MagicDNS fixture: system resolver 100.x, public NXDOMAIN, tailnet Serve ---
 expect_classify 2 unpublished NXDOMAIN NXDOMAIN "$PROBE" "$EGRESS" \
     "NXDOMAIN plus 100.x tailnet probe is unpublished" "$TAILNET_JSON"
-expect_classify 2 unpublished NXDOMAIN NXDOMAIN "203.0.113.10" "$EGRESS" \
+expect_classify 2 unpublished NXDOMAIN NXDOMAIN "8.8.8.8" "$EGRESS" \
     "SYSTEM_A does not change the unpublished exit" "$TAILNET_JSON"
 
 run_classify NXDOMAIN NXDOMAIN "$PROBE" "$EGRESS" "$TAILNET_JSON"
@@ -112,13 +123,13 @@ assert_pattern_absent "$SCRIPT" '177\.55\.231\.7' \
     "classifier does not hardcode a measured public address"
 
 expect_classify 0 public-funnel \
-    "203.0.113.10 198.51.100.10 203.0.113.10" $'198.51.100.10\t203.0.113.10' \
+    "8.8.8.8 1.1.1.1 8.8.8.8" $'1.1.1.1\t8.8.8.8' \
     "$PROBE" "$EGRESS" "equal sets ignore order and duplicates"
-expect_classify 3 disagreement "203.0.113.10" "198.51.100.10" \
+expect_classify 3 disagreement "8.8.8.8" "1.1.1.1" \
     "$PROBE" "$EGRESS" "unequal routable sets disagree"
-expect_classify 3 disagreement NXDOMAIN "203.0.113.10" \
+expect_classify 3 disagreement NXDOMAIN "8.8.8.8" \
     "$PROBE" "$EGRESS" "NXDOMAIN plus an address set disagrees"
-expect_classify 3 disagreement "203.0.113.10" NXDOMAIN \
+expect_classify 3 disagreement "8.8.8.8" NXDOMAIN \
     "$PROBE" "$EGRESS" "address set plus NXDOMAIN disagrees"
 expect_classify 3 disagreement NXDOMAIN "10.1.2.3" \
     "$PROBE" "$EGRESS" "NXDOMAIN plus a rejected address still disagrees"
@@ -128,11 +139,11 @@ expect_classify 2 unpublished "" "" \
     "$PROBE" "$EGRESS" "blank answers are an empty set"
 expect_classify 2 unpublished $' \tNXDOMAIN\n' "NXDOMAIN" \
     "$PROBE" "$EGRESS" "padded NXDOMAIN is an empty set"
-expect_classify 3 disagreement $' \tNXDOMAIN\n' "203.0.113.10" \
+expect_classify 3 disagreement $' \tNXDOMAIN\n' "8.8.8.8" \
     "$PROBE" "$EGRESS" "padded NXDOMAIN plus an address disagrees"
 
 for sentinel in TIMEOUT SERVFAIL NODIG; do
-    expect_classify 3 disagreement "$sentinel" "203.0.113.10" \
+    expect_classify 3 disagreement "$sentinel" "8.8.8.8" \
         "$PROBE" "$EGRESS" "$sentinel beats a routable address"
     expect_classify 3 disagreement "$sentinel" NXDOMAIN \
         "$PROBE" "$EGRESS" "$sentinel beats NXDOMAIN"
@@ -148,11 +159,17 @@ expect_classify 2 unpublished "1.1.1.1 8.8.8.8" "8.8.8.8 1.1.1.1" \
     "$PROBE" "8.8.8.8" "egress inside an equal set is unpublished"
 expect_classify 3 disagreement "1.1.1.1" "8.8.8.8" \
     "$PROBE" "8.8.8.8" "unequal routable sets disagree even if one is the egress"
-expect_classify 2 unpublished "10.1.2.3" "10.9.9.9" \
-    "$PROBE" "$EGRESS" "unequal rejected sets stay unpublished"
-expect_classify 2 unpublished "203.0.113.10" "10.1.2.3" \
-    "$PROBE" "$EGRESS" "a rejected address is unpublished when sets differ"
-expect_classify 0 public-funnel "203.0.113.10" "203.0.113.10" \
+expect_classify 3 disagreement "10.1.2.3" "10.9.9.9" \
+    "$PROBE" "$EGRESS" "unequal rejected sets disagree"
+expect_classify 3 disagreement "8.8.8.8" "10.1.2.3" \
+    "$PROBE" "$EGRESS" "a rejected address disagrees when sets differ"
+expect_classify 3 disagreement "example.com" "8.8.8.8" \
+    "$PROBE" "$EGRESS" "unequal sets disagree when a token is not IPv4"
+expect_classify 2 unpublished "8.8.8.8 10.1.2.3" "10.1.2.3 8.8.8.8" \
+    "$PROBE" "$EGRESS" "equal set containing a rejected address is unpublished"
+expect_classify 0 public-funnel "9.9.9.9" "9.9.9.9" \
+    "$PROBE" "1.1.1.1" "9.9.9.9 stays routable when it is not the egress"
+expect_classify 0 public-funnel "8.8.8.8" "8.8.8.8" \
     "$PROBE" "$EGRESS" "tailnet probe does not block a matching public set" \
     "$TAILNET_JSON"
 expect_classify 2 unpublished NXDOMAIN NXDOMAIN \
@@ -208,9 +225,18 @@ rejected_addrs=(
     198.18.0.0
     198.18.1.1
     198.19.255.255
+    198.51.100.0
+    198.51.100.10
+    198.51.100.255
+    203.0.113.0
+    203.0.113.10
+    203.0.113.255
     224.0.0.0
     224.0.0.1
     239.255.255.255
+    240.0.0.0
+    240.0.0.1
+    255.255.255.254
     255.255.255.255
 )
 for ip in "${rejected_addrs[@]}"; do
@@ -238,14 +264,40 @@ routable_addrs=(
     192.169.0.1
     198.17.255.255
     198.20.0.1
-    203.0.113.10
+    198.51.99.255
+    198.51.101.0
+    203.0.112.255
+    203.0.114.0
     223.255.255.255
-    240.0.0.1
 )
 for ip in "${routable_addrs[@]}"; do
     expect_classify 0 public-funnel "$ip" "$ip" \
         "$PROBE" "$EGRESS" "routable $ip is public-funnel"
 done
+
+mkdir -p "$TMP/bin-sort"
+cat > "$TMP/bin-sort/sort" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$TMP/bin-sort/sort"
+saved_path="$PATH"
+PATH="$TMP/bin-sort:$saved_path"
+sort_rc=0
+sort_out="$(
+    PUBLIC_A_1="8.8.8.8" \
+        PUBLIC_A_2="8.8.8.8" \
+        SYSTEM_A="$PROBE" \
+        HOME_EGRESS="$EGRESS" \
+        bash -u "$SCRIPT" classify 2>"$TMP/sort-fail.err"
+)" || sort_rc=$?
+PATH="$saved_path"
+assert_eq "$sort_rc" "3" "sort failure is disagreement, not public-funnel"
+assert_eq "$sort_out" "tailnet_probe=${PROBE}"$'\n'"class=disagreement" \
+    "sort failure class is disagreement"
+assert_not_contains "$sort_out" "public-funnel" \
+    "sort failure does not report public-funnel"
+assert_eq "$(cat "$TMP/sort-fail.err")" "" "sort failure writes no stderr"
 
 unset_rc=0
 unset_out="$(
@@ -268,7 +320,7 @@ assert_eq "$same_rc" "$unset_rc" "explicit classify matches the default exit"
 cat > "$TMP/bin/dig" <<'EOF'
 #!/usr/bin/env bash
 printf 'ran\n' >> "${DIG_MARKER:?}"
-printf '203.0.113.10\n'
+printf '8.8.8.8\n'
 EOF
 chmod +x "$TMP/bin/dig"
 rm -f "$TMP/dig-ran" "$TMP/curl-ran"
@@ -281,8 +333,8 @@ net_out="$(
     PATH="$TMP/bin:$PATH" \
         CURL_MARKER="$TMP/curl-ran" \
         DIG_MARKER="$TMP/dig-ran" \
-        PUBLIC_A_1="203.0.113.10" \
-        PUBLIC_A_2="203.0.113.10" \
+        PUBLIC_A_1="8.8.8.8" \
+        PUBLIC_A_2="8.8.8.8" \
         SYSTEM_A="$PROBE" \
         HOME_EGRESS="$EGRESS" \
         bash -u "$SCRIPT" classify 2>"$TMP/net.err"
@@ -305,7 +357,7 @@ resolve_rc=0
 resolve_out="$(
     PATH="$TMP/bin:$PATH" \
         CURL_MARKER="$TMP/curl-ran" \
-        bash -u "$SCRIPT" public-probe --resolve "${DNS_NAME}:443:203.0.113.10" \
+        bash -u "$SCRIPT" public-probe --resolve "${DNS_NAME}:443:8.8.8.8" \
         "https://${DNS_NAME}/" 2>"$TMP/resolve.err"
 )" || resolve_rc=$?
 assert_ne "$resolve_rc" "4" "public-probe with --resolve is not the refusal exit"
@@ -391,6 +443,31 @@ expect_funnel 1 "funnel=no" \
     '{"TCP":{"8443":{"HTTPS":true}},"AllowFunnel":{"'"${allow_key}"'":true}}' \
     "HTTPS on another TCP port does not invent a :443 funnel"
 
+FG_HTTPS_WINS_JSON="$(cat <<EOF
+{"TCP":{"443":{"TCPForward":"127.0.0.1:8092"}},"AllowFunnel":{"${allow_key}":true},"Foreground":{"sess-a":{"TCP":{"443":{"HTTPS":true}}}}}
+EOF
+)"
+FG_RAW_WINS_JSON="$(cat <<EOF
+{"TCP":{"443":{"HTTPS":true}},"AllowFunnel":{"${allow_key}":false},"Web":{"${DNS_NAME}:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8080"}}}},"Foreground":{"sess-a":{"TCP":{"443":{"TCPForward":"127.0.0.1:8092"}},"AllowFunnel":{"${allow_key}":true}}}}
+EOF
+)"
+FG_8443_JSON="$(cat <<EOF
+{"TCP":{"443":{"TCPForward":"127.0.0.1:8092"}},"AllowFunnel":{"${allow_key}":true},"Foreground":{"sess-a":{"TCP":{"8443":{"HTTPS":true}},"Web":{"${DNS_NAME}:8443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8091"}}}}}}}
+EOF
+)"
+FG_CONFLICT_JSON="$(cat <<EOF
+{"TCP":{"443":{"TCPForward":"127.0.0.1:8092"}},"AllowFunnel":{"${allow_key}":true},"Foreground":{"sess-a":{"TCP":{"443":{"TCPForward":"127.0.0.1:8092"}},"AllowFunnel":{"${allow_key}":true}},"sess-b":{"Web":{"${DNS_NAME}:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8080"}}}}}}}
+EOF
+)"
+expect_funnel 1 "funnel=no" "$FG_HTTPS_WINS_JSON" \
+    "foreground HTTPS on 443 replaces a good background funnel"
+expect_funnel 0 "funnel=yes" "$FG_RAW_WINS_JSON" \
+    "foreground raw TCP funnel wins over a bad background stanza"
+expect_funnel 0 "funnel=yes" "$FG_8443_JSON" \
+    "foreground on 8443 does not replace a good background port 443"
+expect_funnel 1 "funnel=no" "$FG_CONFLICT_JSON" \
+    "two foreground configs that mention 443 conflict"
+
 fn_rc=0
 fn_out="$(
     env -u CODE_SERVER_PUBLIC_DNS_NAME SERVE_JSON="$PASS_JSON" \
@@ -417,5 +494,23 @@ assert_eq "$(cat "$TMP/src.err")" "" "sourcing the script writes no stderr"
 src_fns="$(bash -uc 'source "$1"; declare -F serve_json_is_our_funnel' bash "$SCRIPT")"
 assert_contains "$src_fns" "serve_json_is_our_funnel" \
     "serve_json_is_our_funnel is defined when sourced"
+
+mkdir -p "$TMP/bin-mktemp"
+cat > "$TMP/bin-mktemp/mktemp" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$TMP/bin-mktemp/mktemp"
+mk_rc=0
+(
+    trap - EXIT
+    hash -r
+    PATH="$TMP/bin-mktemp:$PATH"
+    hash -r
+    csp_acquire_tmp
+) >/dev/null 2>"$TMP/mktemp-fail.err" || mk_rc=$?
+assert_eq "$mk_rc" "1" "mktemp failure exits non-zero before use"
+assert_contains "$(cat "$TMP/mktemp-fail.err")" "mktemp failed" \
+    "mktemp failure prints an error on stderr"
 
 summary
