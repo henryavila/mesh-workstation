@@ -513,4 +513,145 @@ assert_eq "$mk_rc" "1" "mktemp failure exits non-zero before use"
 assert_contains "$(cat "$TMP/mktemp-fail.err")" "mktemp failed" \
     "mktemp failure prints an error on stderr"
 
+# --- probe: no live flag, no dig, no curl ---
+mkdir -p "$TMP/probe-bin"
+cat > "$TMP/probe-bin/dig" <<'EOF'
+#!/usr/bin/env bash
+printf 'ran\n' >> "${DIG_MARKER:?}"
+printf 'NXDOMAIN\n'
+EOF
+cat > "$TMP/probe-bin/curl" <<'EOF'
+#!/usr/bin/env bash
+printf 'ran\n' >> "${CURL_MARKER:?}"
+printf '200\n'
+EOF
+chmod +x "$TMP/probe-bin/dig" "$TMP/probe-bin/curl"
+rm -f "$TMP/probe-dig" "$TMP/probe-curl"
+probe_rc=0
+probe_out="$(
+    env -u MESH_CODE_SERVER_LIVE \
+        PATH="$TMP/probe-bin:$PATH" \
+        DIG_MARKER="$TMP/probe-dig" \
+        CURL_MARKER="$TMP/probe-curl" \
+        bash -u "$SCRIPT" probe --expect unpublished 2>"$TMP/probe-off.err"
+)" || probe_rc=$?
+assert_eq "$probe_rc" "0" "probe --expect unpublished exits 0 when live mode is unset"
+assert_eq "$probe_out" "" "unset probe prints nothing"
+assert_eq "$(cat "$TMP/probe-off.err")" "" "unset probe writes no stderr"
+if [[ -f "$TMP/probe-dig" || -f "$TMP/probe-curl" ]]; then
+    fail "unset probe did not exec dig or curl"
+else
+    pass "unset probe did not exec dig or curl"
+fi
+
+dig_script() {
+    cat > "$TMP/probe-bin/dig" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${DIG_MARKER:?}"
+server=""
+for arg in "$@"; do
+    case "$arg" in
+        @1.1.1.1|@8.8.8.8) server="${arg#@}" ;;
+    esac
+done
+if [[ -z "$server" ]]; then
+    printf 'system resolver\n' >> "${DIG_MARKER:?}"
+    exit 99
+fi
+case "$server" in
+    1.1.1.1) printf '%s\n' "${DIG_1:?}" ;;
+    8.8.8.8) printf '%s\n' "${DIG_2:?}" ;;
+esac
+exit "${DIG_RC:-0}"
+EOF
+    chmod +x "$TMP/probe-bin/dig"
+}
+
+run_live_probe() {
+    local errf="$TMP/probe-live.err"
+    rm -f "$TMP/probe-dig" "$TMP/probe-curl"
+    PROBE_RC=0
+    PROBE_OUT="$(
+        MESH_CODE_SERVER_LIVE=1 \
+            CODE_SERVER_PUBLIC_DNS_NAME="$DNS_NAME" \
+            HOME_EGRESS="${PROBE_EGRESS:-$EGRESS}" \
+            PATH="$TMP/probe-bin:/usr/bin:/bin" \
+            DIG_MARKER="$TMP/probe-dig" \
+            CURL_MARKER="$TMP/probe-curl" \
+            DIG_1="$1" \
+            DIG_2="$2" \
+            DIG_RC="${3:-0}" \
+            bash -u "$SCRIPT" probe --expect unpublished 2>"$errf"
+    )" || PROBE_RC=$?
+    PROBE_ERR="$(cat "$errf")"
+}
+
+dig_script
+run_live_probe $';; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 1' \
+    $';; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 2'
+assert_eq "$PROBE_RC" "0" "live probe exits 0 for NXDOMAIN at both public resolvers"
+assert_contains "$PROBE_OUT" "class=unpublished" "live NXDOMAIN probe prints class=unpublished"
+assert_not_contains "$(cat "$TMP/probe-dig")" "system resolver" "live probe never queries the system resolver"
+assert_contains "$(cat "$TMP/probe-dig")" "@1.1.1.1" "live probe queries 1.1.1.1"
+assert_contains "$(cat "$TMP/probe-dig")" "@8.8.8.8" "live probe queries 8.8.8.8"
+assert_contains "$(cat "$TMP/probe-dig")" "$DNS_NAME" "live probe queries the public DNS name"
+if [[ -f "$TMP/probe-curl" ]]; then
+    fail "live probe did not exec curl"
+else
+    pass "live probe did not exec curl"
+fi
+
+run_live_probe $'example.test. 60 IN A 8.8.8.8' $'example.test. 60 IN A 1.1.1.1'
+assert_ne "$PROBE_RC" "0" "live probe is non-zero when resolvers disagree"
+assert_contains "$PROBE_OUT" "class=disagreement" "disagreement probe prints class=disagreement"
+
+run_live_probe $'example.test. 60 IN A 8.8.8.8' $'example.test. 30 IN A 8.8.8.8'
+assert_ne "$PROBE_RC" "0" "live probe is non-zero for a public-funnel class"
+assert_contains "$PROBE_OUT" "class=public-funnel" "routable answers print class=public-funnel"
+
+run_live_probe $';; ->>HEADER<<- opcode: QUERY, status: SERVFAIL, id: 1' \
+    $';; ->>HEADER<<- opcode: QUERY, status: SERVFAIL, id: 2'
+assert_ne "$PROBE_RC" "0" "SERVFAIL at both resolvers is not an unpublished probe success"
+
+run_live_probe ';; connection timed out; no servers could be reached' \
+    ';; connection timed out; no servers could be reached' 9
+assert_ne "$PROBE_RC" "0" "dig timeout is not an unpublished probe success"
+
+mkdir -p "$TMP/no-dig-bin"
+rm -f "$TMP/probe-curl"
+probe_rc=0
+probe_out="$(
+    MESH_CODE_SERVER_LIVE=1 \
+        CODE_SERVER_PUBLIC_DNS_NAME="$DNS_NAME" \
+        PATH="$TMP/no-dig-bin:/bin" \
+        CURL_MARKER="$TMP/probe-curl" \
+        /bin/bash -u "$SCRIPT" probe --expect unpublished 2>"$TMP/probe-nodig.err"
+)" || probe_rc=$?
+assert_ne "$probe_rc" "0" "missing dig is not an unpublished probe success"
+assert_contains "$probe_out" "class=disagreement" "missing dig maps to a dig-failure token"
+if [[ -f "$TMP/probe-curl" ]]; then
+    fail "missing-dig probe did not exec curl"
+else
+    pass "missing-dig probe did not exec curl"
+fi
+
+dig_script
+PROBE_EGRESS="9.9.9.9"
+run_live_probe $'example.test. 60 IN A 9.9.9.9' $'example.test. 60 IN A 9.9.9.9'
+assert_eq "$PROBE_RC" "0" "egress address at both resolvers is an unpublished probe success"
+assert_contains "$PROBE_OUT" "class=unpublished" "egress probe prints class=unpublished"
+PROBE_EGRESS="$EGRESS"
+
+dig_before="$(wc -l < "$TMP/probe-dig" | tr -d ' ')"
+probe_rc=0
+probe_out="$(
+    MESH_CODE_SERVER_LIVE=1 \
+        PATH="$TMP/probe-bin:/usr/bin:/bin" \
+        DIG_MARKER="$TMP/probe-dig" \
+        bash -u "$SCRIPT" probe 2>"$TMP/probe-noexpect.err"
+)" || probe_rc=$?
+dig_after="$(wc -l < "$TMP/probe-dig" | tr -d ' ')"
+assert_ne "$probe_rc" "0" "live probe without --expect unpublished is non-zero"
+assert_eq "$dig_before" "$dig_after" "live probe without --expect unpublished does not exec dig"
+
 summary

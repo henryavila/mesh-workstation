@@ -177,7 +177,7 @@ uninstall() {
     [[ "$(uname -s)" == "Darwin" ]] || return 0
 
     local label="${CODE_SERVER_LABEL:-com.${USER}.code-server}"
-    local port="${CODE_SERVER_PORT:-8080}"
+    local port="${CODE_SERVER_PORT:-8091}"
     local prefix="${CODE_SERVER_INSTALL_PREFIX:-$HOME/.local}"
     local plist="$HOME/Library/LaunchAgents/${label}.plist"
     local wrapper="${prefix}/bin/code-server-service"
@@ -271,52 +271,140 @@ remove_legacy_codex_compat_shim() {
 
 write_code_server_machine_settings() {
     # Agent extensions (Claude Code, OpenAI Codex) touch the Node navigator
-    # global; without --supportGlobalNavigator the extension host throws
+    # global; without supportNodeGlobalNavigator the extension host throws
     # PendingMigrationError on activation and their webviews hang. The SERVER
     # side configuration service reads REMOTE MACHINE settings
     # (<user-data>/Machine/settings.json) when forking the extension host —
     # NOT <user-data>/User/settings.json (verified against server-main.js:
     # `new ...(a.machineSettingsResource, ...)` feeds the getValue that pushes
     # the flag). So the setting must live here to take effect.
+    # remote.autoForwardPorts is merged on every run so a later flag cannot
+    # be skipped just because supportNodeGlobalNavigator is already true.
     local machine_dir="${CODE_SERVER_USER_DATA_DIR}/Machine"
     local machine_settings="${machine_dir}/settings.json"
-
-    if [[ -f "$machine_settings" ]] \
-        && grep -Fq '"extensions.supportNodeGlobalNavigator": true' "$machine_settings"; then
-        ok "code-server machine settings already enable supportNodeGlobalNavigator"
-        return 0
-    fi
+    local merge_state
 
     mkdir -p "$machine_dir"
 
     if [[ ! -f "$machine_settings" ]] || ! grep -q '[^[:space:]]' "$machine_settings"; then
-        printf '{\n  "extensions.supportNodeGlobalNavigator": true\n}\n' > "$machine_settings"
-        ok "wrote code-server machine settings with supportNodeGlobalNavigator"
+        printf '{\n  "extensions.supportNodeGlobalNavigator": true,\n  "remote.autoForwardPorts": false\n}\n' > "$machine_settings"
+        ok "wrote code-server machine settings (supportNodeGlobalNavigator, remote.autoForwardPorts off)"
         return 0
     fi
 
     if command -v python3 >/dev/null 2>&1; then
-        if python3 - "$machine_settings" <<'PY'
-import json, sys
+        merge_state="$(python3 - "$machine_settings" <<'PY'
+import json, os, sys
 path = sys.argv[1]
 with open(path) as f:
     data = json.load(f)
-data["extensions.supportNodeGlobalNavigator"] = True
+if not isinstance(data, dict):
+    sys.exit(1)
+changed = False
+if data.get("extensions.supportNodeGlobalNavigator") is not True:
+    data["extensions.supportNodeGlobalNavigator"] = True
+    changed = True
+if data.get("remote.autoForwardPorts") is not False:
+    data["remote.autoForwardPorts"] = False
+    changed = True
+if not changed:
+    print("unchanged")
+    sys.exit(0)
 tmp = path + ".tmp"
 with open(tmp, "w") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
-import os
 os.replace(tmp, path)
+print("merged")
 PY
-        then
-            ok "merged supportNodeGlobalNavigator into existing code-server machine settings"
-            return 0
+)" && case "$merge_state" in
+            unchanged)
+                ok "code-server machine settings already include supportNodeGlobalNavigator and remote.autoForwardPorts off"
+                return 0
+                ;;
+            merged)
+                ok "merged supportNodeGlobalNavigator and remote.autoForwardPorts into code-server machine settings"
+                return 0
+                ;;
+        esac
+    fi
+
+    followup manual "could not merge extensions.supportNodeGlobalNavigator and remote.autoForwardPorts into $machine_settings — set \"extensions.supportNodeGlobalNavigator\": true and \"remote.autoForwardPorts\": false manually and restart code-server, or agent extensions (Claude/Codex) will fail with PendingMigrationError."
+    return 0
+}
+
+decode_detect_brew_value() {
+    local raw="$1"
+    raw="${raw//\\ / }"
+    printf '%s' "$raw"
+}
+
+append_extra_path() {
+    local entry="$1"
+    [[ -z "$entry" ]] && return 0
+    : "${CODE_SERVER_EXTRA_PATH:=}"
+    case ":$CODE_SERVER_EXTRA_PATH:" in
+        *":$entry:"*) ;;
+        *)
+            if [[ -z "$CODE_SERVER_EXTRA_PATH" ]]; then
+                CODE_SERVER_EXTRA_PATH="$entry"
+            else
+                CODE_SERVER_EXTRA_PATH="${CODE_SERVER_EXTRA_PATH}:$entry"
+            fi
+            ;;
+    esac
+}
+
+detect_code_server_env() {
+    : "${CODE_SERVER_EXTRA_PATH:=}"
+    if [[ "$CODE_SERVER_INSTALL_METHOD" != "standalone" ]]; then
+        followup critical "CODE_SERVER_INSTALL_METHOD=$CODE_SERVER_INSTALL_METHOD is not supported yet. Use CODE_SERVER_INSTALL_METHOD=standalone."
+        exit 1
+    fi
+
+    if [[ "$CODE_SERVER_INSTALL_PREFIX" != "$HOME/.local" ]]; then
+        followup critical "CODE_SERVER_INSTALL_PREFIX must be $HOME/.local in this release. External prefixes need a separate wrapper design."
+        exit 1
+    fi
+
+    if [[ ! -d "$CODE_SERVER_WORKDIR" ]]; then
+        followup critical "CODE_SERVER_WORKDIR does not exist: $CODE_SERVER_WORKDIR"
+        exit 1
+    fi
+    CODE_SERVER_WORKDIR="$(cd "$CODE_SERVER_WORKDIR" && pwd -P)"
+
+    CODE_SERVER_BIN="${CODE_SERVER_INSTALL_PREFIX}/bin/code-server"
+    CODE_SERVER_SERVICE_WRAPPER="${CODE_SERVER_INSTALL_PREFIX}/bin/code-server-service"
+    CODE_SERVER_CONFIG_DIR="${HOME}/.config/code-server"
+    CODE_SERVER_CONFIG_FILE="${CODE_SERVER_CONFIG_DIR}/config.yaml"
+    CODE_SERVER_STATE_DIR="${HOME}/.local/state/code-server"
+    CODE_SERVER_USER_DATA_DIR="${HOME}/.local/share/code-server"
+    CODE_SERVER_PLIST="${HOME}/Library/LaunchAgents/${CODE_SERVER_LABEL}.plist"
+
+    if [[ -z "${BREW_PREFIX:-}" ]]; then
+        local detect_out line
+        if detect_out="$(bash "$HERE/../../scripts/lib/detect-brew.sh" 2>/dev/null)"; then
+            while IFS= read -r line; do
+                case "$line" in
+                    BREW_BIN=*) BREW_BIN="$(decode_detect_brew_value "${line#BREW_BIN=}")" ;;
+                    BREW_PREFIX=*) BREW_PREFIX="$(decode_detect_brew_value "${line#BREW_PREFIX=}")" ;;
+                    "") ;;
+                    *) followup manual "unexpected output from detect-brew.sh while preparing code-server PATH; ignoring line: $line" ;;
+                esac
+            done <<< "$detect_out"
         fi
     fi
 
-    followup manual "could not merge extensions.supportNodeGlobalNavigator into $machine_settings — add \"extensions.supportNodeGlobalNavigator\": true manually and restart code-server, or agent extensions (Claude/Codex) will fail with PendingMigrationError."
-    return 0
+    if [[ -n "${BREW_PREFIX:-}" ]]; then
+        append_extra_path "$BREW_PREFIX/bin"
+        append_extra_path "$BREW_PREFIX/sbin"
+    fi
+    append_extra_path "/opt/homebrew/bin"
+    append_extra_path "/usr/local/bin"
+    append_extra_path "/usr/bin"
+    append_extra_path "/bin"
+    append_extra_path "/usr/sbin"
+    append_extra_path "/sbin"
 }
 
 install() {
@@ -329,9 +417,9 @@ install() {
     . "${MESH_WORKSTATION_DIR:-$(cd "$HERE/../.." && pwd)}/scripts/lib/launch-wrapper.sh"
 
     # Env defaults (preserved from original install.mac.sh header)
-    : "${CODE_SERVER_PORT:=8080}"
+    : "${CODE_SERVER_PORT:=8091}"
     : "${CODE_SERVER_LABEL:=com.${USER}.code-server}"
-    : "${CODE_SERVER_TAILSCALE_SERVE:=1}"
+    : "${CODE_SERVER_TAILSCALE_SERVE:=0}"
     : "${CODE_SERVER_INSTALL_PREFIX:=$HOME/.local}"
     : "${CODE_SERVER_INSTALL_METHOD:=standalone}"
     : "${CODE_SERVER_UPGRADE:=0}"
@@ -350,32 +438,18 @@ CODE_SERVER_GENERATED_PASSWORD=""
 BREW_BIN="${BREW_BIN:-}"
 BREW_PREFIX="${BREW_PREFIX:-}"
 
+    # Resolved port. 8080 is the retired code-server default; refuse it before
+    # any config, plist, or tailscale command.
+    if [[ "$CODE_SERVER_PORT" == "8080" ]]; then
+        followup critical "refusing CODE_SERVER_PORT=8080; code-server listens on 127.0.0.1:8091."
+        exit 1
+    fi
+
 require_macos() {
     if [[ "$(uname -s)" != "Darwin" ]]; then
         followup critical "85-code-server is macOS-only in this release; skipping $(uname -s)."
         exit 1
     fi
-}
-
-decode_detect_brew_value() {
-    local raw="$1"
-    raw="${raw//\\ / }"
-    printf '%s' "$raw"
-}
-
-append_extra_path() {
-    local entry="$1"
-    [[ -z "$entry" ]] && return 0
-    case ":$CODE_SERVER_EXTRA_PATH:" in
-        *":$entry:"*) ;;
-        *)
-            if [[ -z "$CODE_SERVER_EXTRA_PATH" ]]; then
-                CODE_SERVER_EXTRA_PATH="$entry"
-            else
-                CODE_SERVER_EXTRA_PATH="${CODE_SERVER_EXTRA_PATH}:$entry"
-            fi
-            ;;
-    esac
 }
 
 plist_escape() {
@@ -482,57 +556,6 @@ Update when ready:
     fi
 }
 
-detect_code_server_env() {
-    if [[ "$CODE_SERVER_INSTALL_METHOD" != "standalone" ]]; then
-        followup critical "CODE_SERVER_INSTALL_METHOD=$CODE_SERVER_INSTALL_METHOD is not supported yet. Use CODE_SERVER_INSTALL_METHOD=standalone."
-        exit 1
-    fi
-
-    if [[ "$CODE_SERVER_INSTALL_PREFIX" != "$HOME/.local" ]]; then
-        followup critical "CODE_SERVER_INSTALL_PREFIX must be $HOME/.local in this release. External prefixes need a separate wrapper design."
-        exit 1
-    fi
-
-    if [[ ! -d "$CODE_SERVER_WORKDIR" ]]; then
-        followup critical "CODE_SERVER_WORKDIR does not exist: $CODE_SERVER_WORKDIR"
-        exit 1
-    fi
-    CODE_SERVER_WORKDIR="$(cd "$CODE_SERVER_WORKDIR" && pwd -P)"
-
-    CODE_SERVER_BIN="${CODE_SERVER_INSTALL_PREFIX}/bin/code-server"
-    CODE_SERVER_SERVICE_WRAPPER="${CODE_SERVER_INSTALL_PREFIX}/bin/code-server-service"
-    CODE_SERVER_CONFIG_DIR="${HOME}/.config/code-server"
-    CODE_SERVER_CONFIG_FILE="${CODE_SERVER_CONFIG_DIR}/config.yaml"
-    CODE_SERVER_STATE_DIR="${HOME}/.local/state/code-server"
-    CODE_SERVER_USER_DATA_DIR="${HOME}/.local/share/code-server"
-    CODE_SERVER_PLIST="${HOME}/Library/LaunchAgents/${CODE_SERVER_LABEL}.plist"
-
-    if [[ -z "${BREW_PREFIX:-}" ]]; then
-        local detect_out line
-        if detect_out="$(bash "$HERE/../../scripts/lib/detect-brew.sh" 2>/dev/null)"; then
-            while IFS= read -r line; do
-                case "$line" in
-                    BREW_BIN=*) BREW_BIN="$(decode_detect_brew_value "${line#BREW_BIN=}")" ;;
-                    BREW_PREFIX=*) BREW_PREFIX="$(decode_detect_brew_value "${line#BREW_PREFIX=}")" ;;
-                    "") ;;
-                    *) followup manual "unexpected output from detect-brew.sh while preparing code-server PATH; ignoring line: $line" ;;
-                esac
-            done <<< "$detect_out"
-        fi
-    fi
-
-    if [[ -n "${BREW_PREFIX:-}" ]]; then
-        append_extra_path "$BREW_PREFIX/bin"
-        append_extra_path "$BREW_PREFIX/sbin"
-    fi
-    append_extra_path "/opt/homebrew/bin"
-    append_extra_path "/usr/local/bin"
-    append_extra_path "/usr/bin"
-    append_extra_path "/bin"
-    append_extra_path "/usr/sbin"
-    append_extra_path "/sbin"
-}
-
 install_code_server_standalone() {
     if [[ "$CODE_SERVER_INSTALL_METHOD" != "standalone" || "$CODE_SERVER_INSTALL_PREFIX" != "$HOME/.local" ]]; then
         followup critical "code-server standalone install preconditions failed; rerun with CODE_SERVER_INSTALL_METHOD=standalone and CODE_SERVER_INSTALL_PREFIX=$HOME/.local."
@@ -565,20 +588,20 @@ install_code_server_standalone() {
 record_generated_password_final() {
     [[ -n "$CODE_SERVER_GENERATED_PASSWORD" ]] || return 0
 
+    local msg
+    msg="Generated code-server password for this first install:
+    $CODE_SERVER_GENERATED_PASSWORD
+
+$CODE_SERVER_CONFIG_FILE (mode 0600) stores the hash. The plaintext cannot be recovered from it."
+
     if [[ -n "${MESH_FOLLOWUP_FILE:-}" ]]; then
         # Deliberately bypass followup(): that helper prints inline while the
         # topic is piped through tee into /tmp/mesh-workstation-*.log. The final
         # summary is rendered after the topic pipeline, so the generated
         # password appears only at the end of this run, not in the topic log.
-        printf '%s\x1f%s\x1e' "info" "Generated code-server password for this first install:
-    $CODE_SERVER_GENERATED_PASSWORD
-
-It is also stored in $CODE_SERVER_CONFIG_FILE (mode 0600). If you miss this
-summary, read the password from that file on this host." >> "$MESH_FOLLOWUP_FILE" 2>/dev/null || true
+        printf '%s\x1f%s\x1e' "info" "$msg" >> "$MESH_FOLLOWUP_FILE" 2>/dev/null || true
     else
-        info "generated code-server password for this first install: $CODE_SERVER_GENERATED_PASSWORD"
-        info "it is also stored in $CODE_SERVER_CONFIG_FILE (mode 0600)"
-        info "if you miss this summary, read the password from that file on this host"
+        info "$msg"
     fi
 }
 
@@ -622,21 +645,144 @@ choose_code_server_password() {
     printf '%s' "$CODE_SERVER_GENERATED_PASSWORD"
 }
 
-write_code_server_config() {
-    local password tmp old_umask
-    password="$(choose_code_server_password)"
+# Hash argv is exactly: npx --yes argon2-cli -e
+# stdin is the password with no trailing newline (echo -n). Tests shadow npx.
+hash_code_server_password() {
+    local pw="$1" hash rc=0
+    hash="$(echo -n "$pw" | npx --yes argon2-cli -e)" || rc=$?
+    [[ "$rc" -eq 0 ]] || return 1
+    case "$hash" in
+        \$argon2*) printf '%s' "$hash" ;;
+        *) return 1 ;;
+    esac
+}
+
+_code_server_write_hashed_config() {
+    local hashed="$1" tmp old_umask
+    case "$hashed" in
+        \$argon2*) ;;
+        *) return 1 ;;
+    esac
     old_umask="$(umask)"
     umask 077
     tmp="${CODE_SERVER_CONFIG_FILE}.tmp.$$"
     {
         printf 'bind-addr: 127.0.0.1:%s\n' "$CODE_SERVER_PORT"
         printf 'auth: password\n'
-        printf 'password: %s\n' "$password"
+        printf 'hashed-password: %s\n' "$hashed"
         printf 'cert: false\n'
     } > "$tmp"
     umask "$old_umask"
-    unset password
     mv "$tmp" "$CODE_SERVER_CONFIG_FILE"
+}
+
+write_code_server_config() {
+    local password hashed
+    password="$(choose_code_server_password)"
+    if ! hashed="$(hash_code_server_password "$password")"; then
+        unset password hashed
+        followup critical "code-server password hash failed or did not start with \$argon2 (npx --yes argon2-cli -e)."
+        exit 1
+    fi
+    unset password
+    if ! _code_server_write_hashed_config "$hashed"; then
+        unset hashed
+        followup critical "code-server password hash failed or did not start with \$argon2 (npx --yes argon2-cli -e)."
+        exit 1
+    fi
+    unset hashed
+}
+
+_code_server_backup_config() {
+    local backup
+    backup="${CODE_SERVER_CONFIG_FILE}.bak-$(date +%Y%m%d-%H%M%S)"
+    cp -p "$CODE_SERVER_CONFIG_FILE" "$backup"
+    info "backed up existing code-server config to $backup"
+}
+
+_code_server_config_bind_ok() {
+    grep -Eq "^[[:space:]]*bind-addr:[[:space:]]*127\\.0\\.0\\.1:${CODE_SERVER_PORT}[[:space:]]*$" "$1"
+}
+
+_code_server_config_has_plaintext_password() {
+    grep -Eq '^[[:space:]]*password:[[:space:]]*' "$1"
+}
+
+_code_server_config_has_hashed_password() {
+    grep -Eq '^[[:space:]]*hashed-password:[[:space:]]*[^[:space:]]' "$1"
+}
+
+_code_server_extract_plaintext_password() {
+    awk '
+        /^[[:space:]]*password:[[:space:]]*/ {
+            sub(/^[[:space:]]*password:[[:space:]]*/, "", $0)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+            if (($0 ~ /^".*"$/) || ($0 ~ /^'\''.*'\''$/)) {
+                $0 = substr($0, 2, length($0) - 2)
+            }
+            print
+            exit
+        }
+    ' "$1"
+}
+
+_code_server_extract_hashed_password() {
+    awk '
+        /^[[:space:]]*hashed-password:[[:space:]]*/ {
+            sub(/^[[:space:]]*hashed-password:[[:space:]]*/, "", $0)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+            if (($0 ~ /^".*"$/) || ($0 ~ /^'\''.*'\''$/)) {
+                $0 = substr($0, 2, length($0) - 2)
+            }
+            print
+            exit
+        }
+    ' "$1"
+}
+
+_code_server_note_password_saved() {
+    if [[ -n "$CODE_SERVER_GENERATED_PASSWORD" ]]; then
+        record_generated_password_final
+    else
+        followup info "code-server password hash was saved in $CODE_SERVER_CONFIG_FILE (mode 0600). The plaintext cannot be recovered from it."
+    fi
+}
+
+_code_server_rewrite_preserving_secret() {
+    local plain hashed
+    if _code_server_config_has_plaintext_password "$CODE_SERVER_CONFIG_FILE"; then
+        plain="$(_code_server_extract_plaintext_password "$CODE_SERVER_CONFIG_FILE")"
+        if [[ -z "$plain" ]]; then
+            followup critical "code-server config has an empty password line; refusing to hash it."
+            exit 1
+        fi
+        if ! hashed="$(hash_code_server_password "$plain")"; then
+            unset plain hashed
+            followup critical "code-server password hash failed or did not start with \$argon2 (npx --yes argon2-cli -e)."
+            exit 1
+        fi
+        unset plain
+    else
+        hashed="$(_code_server_extract_hashed_password "$CODE_SERVER_CONFIG_FILE")"
+        case "$hashed" in
+            \$argon2*) ;;
+            *)
+                unset hashed
+                _code_server_backup_config
+                write_code_server_config
+                _code_server_note_password_saved
+                return 0
+                ;;
+        esac
+    fi
+    _code_server_backup_config
+    if ! _code_server_write_hashed_config "$hashed"; then
+        unset hashed
+        followup critical "code-server config must bind only to 127.0.0.1:${CODE_SERVER_PORT}. Re-run with CODE_SERVER_REWRITE_CONFIG=1 after reviewing $CODE_SERVER_CONFIG_FILE."
+        exit 1
+    fi
+    unset hashed
+    ok "rewrote code-server config to hashed-password on 127.0.0.1:${CODE_SERVER_PORT}"
 }
 
 ensure_code_server_config() {
@@ -648,29 +794,18 @@ ensure_code_server_config() {
         "$CODE_SERVER_USER_DATA_DIR/User/globalStorage"
 
     if [[ -f "$CODE_SERVER_CONFIG_FILE" && "${CODE_SERVER_REWRITE_CONFIG:-0}" == "1" ]]; then
-        local backup
-        backup="${CODE_SERVER_CONFIG_FILE}.bak-$(date +%Y%m%d-%H%M%S)"
-        cp -p "$CODE_SERVER_CONFIG_FILE" "$backup"
-        info "backed up existing code-server config to $backup"
+        _code_server_backup_config
         write_code_server_config
-        if [[ -n "$CODE_SERVER_GENERATED_PASSWORD" ]]; then
-            record_generated_password_final
-        else
-            followup info "code-server password was saved in $CODE_SERVER_CONFIG_FILE (mode 0600)."
-        fi
+        _code_server_note_password_saved
     elif [[ ! -f "$CODE_SERVER_CONFIG_FILE" ]]; then
         write_code_server_config
-        if [[ -n "$CODE_SERVER_GENERATED_PASSWORD" ]]; then
-            record_generated_password_final
-        else
-            followup info "code-server password was saved in $CODE_SERVER_CONFIG_FILE (mode 0600)."
-        fi
-    else
+        _code_server_note_password_saved
+    elif _code_server_config_has_plaintext_password "$CODE_SERVER_CONFIG_FILE" \
+        || ! _code_server_config_bind_ok "$CODE_SERVER_CONFIG_FILE"; then
+        _code_server_rewrite_preserving_secret
+    elif _code_server_config_has_hashed_password "$CODE_SERVER_CONFIG_FILE"; then
         ok "code-server config already exists at $CODE_SERVER_CONFIG_FILE"
-        if ! grep -Eq "^[[:space:]]*bind-addr:[[:space:]]*127\\.0\\.0\\.1:${CODE_SERVER_PORT}[[:space:]]*$" "$CODE_SERVER_CONFIG_FILE"; then
-            followup critical "code-server config must bind only to 127.0.0.1:${CODE_SERVER_PORT}. Re-run with CODE_SERVER_REWRITE_CONFIG=1 after reviewing $CODE_SERVER_CONFIG_FILE."
-            exit 1
-        fi
+    else
         if ! grep -Eq '^[[:space:]]*auth:[[:space:]]*password[[:space:]]*$' "$CODE_SERVER_CONFIG_FILE"; then
             followup critical "code-server config must keep auth: password. Re-run with CODE_SERVER_REWRITE_CONFIG=1 after reviewing $CODE_SERVER_CONFIG_FILE."
             exit 1
@@ -679,6 +814,8 @@ ensure_code_server_config() {
             followup critical "code-server config is missing password/hashed-password. Re-run with CODE_SERVER_REWRITE_CONFIG=1 after reviewing $CODE_SERVER_CONFIG_FILE."
             exit 1
         fi
+        followup critical "code-server config must bind only to 127.0.0.1:${CODE_SERVER_PORT}. Re-run with CODE_SERVER_REWRITE_CONFIG=1 after reviewing $CODE_SERVER_CONFIG_FILE."
+        exit 1
     fi
 
     chmod 0700 "$CODE_SERVER_CONFIG_DIR"
@@ -686,6 +823,16 @@ ensure_code_server_config() {
 }
 
 write_code_server_service_wrapper() {
+    local help
+    help="$("$CODE_SERVER_BIN" --help 2>&1 || true)"
+    case "$help" in
+        *--disable-proxy*) ;;
+        *)
+            followup critical "code-server at $CODE_SERVER_BIN does not list --disable-proxy in --help; refusing to write the service wrapper."
+            exit 1
+            ;;
+    esac
+
     mkdir -p "$(dirname "$CODE_SERVER_SERVICE_WRAPPER")" "$CODE_SERVER_STATE_DIR"
     chmod 0700 "$CODE_SERVER_STATE_DIR"
 
@@ -723,7 +870,7 @@ write_code_server_service_wrapper() {
         printf 'unset token\n'
         printf 'unset gh_bin\n'
         printf '\n'
-        printf 'exec %q\n' "$CODE_SERVER_BIN"
+        printf 'exec %q --disable-proxy\n' "$CODE_SERVER_BIN"
     } > "$tmp"
     mv "$tmp" "$CODE_SERVER_SERVICE_WRAPPER"
     chmod 0700 "$CODE_SERVER_SERVICE_WRAPPER"
@@ -982,11 +1129,10 @@ maybe_configure_tailscale_serve() {
 }
 
 deploy_user_settings_from_identity() {
-    # C9 / D-B10 (mesh-restructure): identity OWNS the settings.json file;
-    # workstation provides the deploy helper. Reads from identity's
-    # ${MESH_IDENTITY_DIR}/code-server/settings.json (current location) and
-    # writes to the code-server User dir with backup-if-different semantics.
-    # No-op when source absent (user hasn't customized settings).
+    # Identity owns the settings seed. Copy only when the code-server User
+    # settings file does not exist yet. An existing destination is left
+    # byte-for-byte: no compare, no backup, no overwrite. The copy forces
+    # remote.autoForwardPorts off; the identity source is not rewritten.
     local identity_dir="${MESH_IDENTITY_DIR:-$HOME/mesh-identity}"
     local src="$identity_dir/code-server/settings.json"
     local user_dir="$HOME/.local/share/code-server/User"
@@ -994,44 +1140,39 @@ deploy_user_settings_from_identity() {
 
     [[ -f "$src" ]] || { dbg "code-server settings: no source at $src (skipping)"; return 0; }
 
-    if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then
-        ok "code-server settings already up to date: $dst"
+    if [[ -e "$dst" ]]; then
+        ok "code-server settings already present; leaving $dst unchanged"
         return 0
     fi
 
     mkdir -p "$user_dir"
     chmod 0700 "$(dirname "$user_dir")" "$user_dir" 2>/dev/null || true
 
-    if [[ -e "$dst" ]]; then
-        local backup
-        # CP4 chunk C finding C-F-005: previously `.bak-$(date +Y...S)`
-        # silently overwrote the only backup when two reruns landed in
-        # the same second. Counter-suffix on collision keeps each
-        # rerun's backup distinct.
-        local ts
-        ts="$(date +%Y%m%d-%H%M%S)"
-        backup="${dst}.bak-${ts}"
-        local i=1
-        while [[ -e "$backup" ]]; do
-            backup="${dst}.bak-${ts}-${i}"
-            i=$((i + 1))
-            (( i > 9999 )) && backup="${dst}.bak-${ts}-$$.${RANDOM}" && break
-        done
-        cp -p "$dst" "$backup"
-        info "backed up previous $dst → $backup"
+    if ! command -v python3 >/dev/null 2>&1; then
+        warn "code-server settings: python3 is required to seed remote.autoForwardPorts"
+        return 1
     fi
 
-    # CP4 chunk C finding C-F-007: atomic write. `cp $src $dst` writes
-    # in place; an interrupt / disk full / concurrent code-server read
-    # can observe partial JSON. Write to a same-dir temp + mv -f.
     local tmp
-    tmp="$(mktemp "${dst}.XXXXXX")" || {
+    tmp="$(mktemp "${user_dir}/.settings.json.XXXXXX")" || {
         warn "code-server settings: failed to mktemp under $user_dir"
         return 1
     }
-    if ! cp "$src" "$tmp"; then
+    if ! python3 - "$src" "$tmp" <<'PY'
+import json, sys
+src, dst = sys.argv[1], sys.argv[2]
+with open(src) as f:
+    data = json.load(f)
+if not isinstance(data, dict):
+    sys.exit(1)
+data["remote.autoForwardPorts"] = False
+with open(dst, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+    then
         rm -f "$tmp"
-        warn "code-server settings: copy to temp failed"
+        warn "code-server settings: failed to seed $dst from $src"
         return 1
     fi
     chmod 0644 "$tmp"
@@ -1072,15 +1213,93 @@ fi
 ok "85-code-server done"
 }
 
+_code_server_launchagent_pid() {
+    local uid out pid
+    command -v launchctl >/dev/null 2>&1 || return 1
+    uid="$(id -u)"
+    out="$(launchctl print "gui/${uid}/${CODE_SERVER_LABEL}" 2>/dev/null)" || return 1
+    pid="$(printf '%s\n' "$out" | awk '
+        /^[[:space:]]*pid = [0-9]+[[:space:]]*$/ {
+            sub(/^[[:space:]]*pid = /, "")
+            sub(/[[:space:]]*$/, "")
+            print
+            exit
+        }
+    ')"
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    printf '%s\n' "$pid"
+}
+
 verify() {
-    # Kept to check() (binary + plist + config on disk). A live healthz/listener
-    # assertion here would need detect_code_server_env's CODE_SERVER_* vars
-    # re-resolved in this separate verify subshell (they are set only inside
-    # install()); getting that wrong would rc=67 a healthy install. install()
-    # now reports a real failure when the server does not come up (see _cs_fail),
-    # which covers the fresh-install case; ongoing liveness is owned by
-    # `mesh code-server status` / `mesh code-server verify`.
-    check
+    # Separate subshell from install(). Resolve paths here; do not read
+    # CODE_SERVER_PORT out of install()'s scope. detect_code_server_env runs
+    # before any lsof.
+    local root HERE listeners agent_pid listener_pid
+    root="$(_code_server_workstation_root)" || {
+        printf 'code-server verify: mesh-workstation root not found\n' >&2
+        return 1
+    }
+    # shellcheck disable=SC1091
+    . "$root/scripts/lib/log.sh"
+
+    HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    HERE="$HERE/.."
+    : "${CODE_SERVER_PORT:=8091}"
+    : "${CODE_SERVER_LABEL:=com.${USER}.code-server}"
+    : "${CODE_SERVER_INSTALL_PREFIX:=$HOME/.local}"
+    : "${CODE_SERVER_INSTALL_METHOD:=standalone}"
+    : "${CODE_SERVER_WORKDIR:=$HOME}"
+    CODE_SERVER_EXTRA_PATH="${CODE_SERVER_EXTRA_PATH:-}"
+
+    detect_code_server_env
+
+    if ! command -v lsof >/dev/null 2>&1; then
+        followup critical "lsof is not available; cannot verify the code-server listener."
+        return 1
+    fi
+
+    listeners="$(lsof -nP -iTCP:"$CODE_SERVER_PORT" -sTCP:LISTEN 2>/dev/null || true)"
+    listener_pid="$(printf '%s\n' "$listeners" | awk -v port="$CODE_SERVER_PORT" '
+        $0 !~ /\(LISTEN\)/ { next }
+        {
+            if ($0 !~ ("TCP 127\\.0\\.0\\.1:" port " \\(LISTEN\\)")) bad=1
+            else {
+                if (pid != "" && pid != $2) bad=1
+                pid=$2
+                seen=1
+            }
+        }
+        END {
+            if (bad || !seen) exit 1
+            print pid
+        }
+    ')" || {
+        printf '%s\n' "$listeners" >&2
+        followup critical "code-server must listen only on 127.0.0.1:${CODE_SERVER_PORT}; refusing a listener that is not the code-server LaunchAgent."
+        return 1
+    }
+
+    agent_pid="$(_code_server_launchagent_pid)" || {
+        followup critical "code-server LaunchAgent ${CODE_SERVER_LABEL} is not running."
+        return 1
+    }
+    if [[ "$listener_pid" != "$agent_pid" ]]; then
+        followup critical "listener PID ${listener_pid} on 127.0.0.1:${CODE_SERVER_PORT} is not LaunchAgent ${CODE_SERVER_LABEL} (pid ${agent_pid})."
+        return 1
+    fi
+
+    if [[ ! -f "$CODE_SERVER_SERVICE_WRAPPER" ]] || ! grep -q -- '--disable-proxy' "$CODE_SERVER_SERVICE_WRAPPER"; then
+        followup critical "code-server service wrapper must contain --disable-proxy."
+        return 1
+    fi
+    if [[ ! -f "$CODE_SERVER_CONFIG_FILE" ]] \
+        || ! grep -Eq '^[[:space:]]*hashed-password:[[:space:]]*[^[:space:]]' "$CODE_SERVER_CONFIG_FILE" \
+        || ! grep -Eq '^[[:space:]]*cert:[[:space:]]*false[[:space:]]*$' "$CODE_SERVER_CONFIG_FILE"; then
+        followup critical "code-server config must contain hashed-password and cert: false."
+        return 1
+    fi
+
+    ok "code-server listener is loopback-only on 127.0.0.1:${CODE_SERVER_PORT}"
 }
 repair() { install; }
 

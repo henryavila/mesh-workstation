@@ -32,8 +32,10 @@ assert_pattern_present "$INSTALL" 'CODE_SERVER_LABEL:=com\.\$\{USER\}\.code-serv
     "installer default label is com.\${USER}.code-server"
 assert_pattern_present "$INSTALL" 'CODE_SERVER_INSTALL_METHOD:=standalone' \
     "installer default install method is standalone"
-assert_pattern_present "$INSTALL" 'CODE_SERVER_TAILSCALE_SERVE:=1' \
-    "installer exposes code-server through Tailscale Serve by default"
+assert_pattern_present "$INSTALL" 'CODE_SERVER_TAILSCALE_SERVE:=0' \
+    "installer leaves Tailscale Serve off by default"
+assert_pattern_absent "$INSTALL" 'CODE_SERVER_TAILSCALE_SERVE:=1' \
+    "installer no longer defaults Tailscale Serve on"
 assert_pattern_present "$INSTALL" 'CODE_SERVER_UPGRADE:=0' \
     "installer defaults code-server upgrades to explicit opt-in"
 assert_pattern_present "$INSTALL" 'CODE_SERVER_CHECK_UPDATES:=1' \
@@ -90,8 +92,20 @@ assert_pattern_present "$INSTALL" 'MESH_FOLLOWUP_FILE' \
     "generated password is deferred to bootstrap final summary"
 assert_pattern_present "$INSTALL" 'Deliberately bypass followup\(\)' \
     "generated password is not printed through tee'd topic logs"
-assert_pattern_present "$INSTALL" 'read the password from that file on this host' \
-    "final password summary tells how to recover a missed password"
+assert_pattern_present "$INSTALL" 'stores the hash' \
+    "final password summary says the config file stores the hash"
+assert_pattern_present "$INSTALL" 'plaintext cannot be recovered' \
+    "final password summary says the plaintext cannot be recovered from the hash"
+assert_pattern_absent "$INSTALL" 'read the password from that file on this host' \
+    "final password summary does not tell the user to read the password from the file"
+assert_pattern_present "$INSTALL" 'npx --yes argon2-cli -e' \
+    "password hash uses npx --yes argon2-cli -e"
+assert_pattern_present "$INSTALL" 'echo -n "\$pw"' \
+    "password hash reads the password on stdin with no trailing newline"
+assert_pattern_present "$INSTALL" 'hashed-password: %s' \
+    "generated config writes hashed-password"
+assert_pattern_absent "$INSTALL" "printf 'password: %s" \
+    "generated config does not write a plaintext password line"
 assert_pattern_absent "$INSTALL" 'echo "\$password"' \
     "installer does not echo generated password"
 
@@ -137,8 +151,12 @@ echo "═══ Tailscale Serve safeguards ═══"
 
 assert_pattern_present "$INSTALL" 'CODE_SERVER_TAILSCALE_SERVE' \
     "Tailscale Serve is gated by CODE_SERVER_TAILSCALE_SERVE"
-assert_pattern_present "$INSTALL" 'CODE_SERVER_TAILSCALE_SERVE:=1' \
-    "topic defaults Tailscale Serve on"
+assert_pattern_present "$INSTALL" 'CODE_SERVER_TAILSCALE_SERVE:=0' \
+    "topic defaults Tailscale Serve off"
+assert_pattern_absent "$INSTALL" 'tailscale funnel' \
+    "installer does not call tailscale funnel"
+assert_pattern_absent "$INSTALL" 'tailscale funnel reset' \
+    "installer does not call tailscale funnel reset"
 assert_pattern_present "$INSTALL" 'tailscale serve status --json' \
     "installer preflights existing Tailscale Serve config"
 assert_pattern_present "$INSTALL" 'No serve config' \

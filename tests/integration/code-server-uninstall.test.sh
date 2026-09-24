@@ -37,7 +37,7 @@ chmod +x "$HOME_DIR/.local/lib/code-server-4.126.0/bin/code-server"
 ln -s "$HOME_DIR/.local/lib/code-server-4.126.0/bin/code-server" "$HOME_DIR/.local/bin/code-server"
 printf '#!/usr/bin/env bash\n' > "$HOME_DIR/.local/bin/code-server-service"
 chmod +x "$HOME_DIR/.local/bin/code-server-service"
-printf 'bind-addr: 127.0.0.1:8080\n' > "$HOME_DIR/.config/code-server/config.yaml"
+printf 'bind-addr: 127.0.0.1:8091\n' > "$HOME_DIR/.config/code-server/config.yaml"
 printf 'log\n' > "$HOME_DIR/.local/state/code-server/launchd.log"
 printf '<plist/>\n' > "$HOME_DIR/Library/LaunchAgents/com.tester.code-server.plist"
 printf 'user-state\n' > "$HOME_DIR/.local/share/code-server/User/globalStorage/state.txt"
@@ -68,7 +68,7 @@ if [[ "${1:-}" == "serve" && "${2:-}" == "status" && "${3:-}" == "--json" ]]; th
   "Web": {
     "code-server.test.ts.net:443": {
       "Handlers": {
-        "/": {"Proxy": "http://127.0.0.1:8080"}
+        "/": {"Proxy": "http://127.0.0.1:8091"}
       }
     }
   }

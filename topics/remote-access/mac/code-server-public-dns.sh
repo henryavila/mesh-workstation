@@ -320,6 +320,112 @@ public_probe() {
     return 1
 }
 
+# Map one public-resolver dig answer onto a classifier token.
+# Servers are only 1.1.1.1 and 8.8.8.8; never the system resolver.
+# Argv is: dig +time=2 +tries=1 +noall +comments +answer @SERVER NAME A
+_csp_dig_public() {
+    local server="$1" name="$2" out rc=0 trimmed addrs
+    if ! command -v dig >/dev/null 2>&1; then
+        printf 'NODIG'
+        return 0
+    fi
+    out="$(dig +time=2 +tries=1 +noall +comments +answer "@${server}" "$name" A 2>&1)" || rc=$?
+    trimmed="$(_csp_trim "$out")"
+    case "$trimmed" in
+        NXDOMAIN|SERVFAIL|TIMEOUT|NODIG)
+            printf '%s' "$trimmed"
+            return 0
+            ;;
+    esac
+    if printf '%s\n' "$out" | grep -q 'status:[[:space:]]*NXDOMAIN'; then
+        printf 'NXDOMAIN'
+        return 0
+    fi
+    if printf '%s\n' "$out" | grep -q 'status:[[:space:]]*SERVFAIL'; then
+        printf 'SERVFAIL'
+        return 0
+    fi
+    if [[ "$rc" -eq 9 ]] || printf '%s\n' "$out" | grep -Eqi 'timed out|no servers could be reached'; then
+        printf 'TIMEOUT'
+        return 0
+    fi
+    addrs="$(printf '%s\n' "$out" | awk '
+        BEGIN { sep = "" }
+        toupper($4) == "A" && $5 ~ /^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$/ {
+            printf "%s%s", sep, $5
+            sep = " "
+            next
+        }
+        NF == 1 && $1 ~ /^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$/ {
+            printf "%s%s", sep, $1
+            sep = " "
+        }
+    ')"
+    if [[ -n "$addrs" ]]; then
+        printf '%s' "$addrs"
+        return 0
+    fi
+    if [[ "$rc" -ne 0 ]]; then
+        printf 'TIMEOUT'
+        return 0
+    fi
+    printf 'SERVFAIL'
+}
+
+_csp_probe_unpublished() {
+    local name a1 a2 out rc=0
+    name="${CODE_SERVER_PUBLIC_DNS_NAME:-mac-mini-m4-de-henry.bream-goldeye.ts.net}"
+    a1="$(_csp_dig_public 1.1.1.1 "$name")"
+    a2="$(_csp_dig_public 8.8.8.8 "$name")"
+    out="$(
+        PUBLIC_A_1="$a1" \
+            PUBLIC_A_2="$a2" \
+            classify_public_name
+    )" || rc=$?
+    printf '%s\n' "$out"
+    if [[ "$rc" -eq 2 ]] && printf '%s\n' "$out" | grep -qx 'class=unpublished'; then
+        return 0
+    fi
+    return 1
+}
+
+# MESH_CODE_SERVER_LIVE unset: exit 0 immediately. Do not exec dig or curl.
+probe() {
+    if [[ -z "${MESH_CODE_SERVER_LIVE+x}" ]]; then
+        return 0
+    fi
+    local expect=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --expect)
+                if [[ $# -lt 2 ]]; then
+                    printf 'probe: --expect requires a value\n' >&2
+                    return 1
+                fi
+                expect="$2"
+                shift 2
+                ;;
+            --expect=*)
+                expect="${1#*=}"
+                shift
+                ;;
+            *)
+                printf 'probe: unknown argument: %s\n' "$1" >&2
+                return 1
+                ;;
+        esac
+    done
+    if [[ "$expect" != "unpublished" ]]; then
+        printf 'probe: only --expect unpublished is supported\n' >&2
+        return 1
+    fi
+    if [[ "${MESH_CODE_SERVER_LIVE}" != "1" ]]; then
+        printf 'probe: refusing live DNS query\n' >&2
+        return 1
+    fi
+    _csp_probe_unpublished
+}
+
 main() {
     local cmd="${1:-classify}"
     if [[ $# -gt 0 ]]; then
@@ -334,6 +440,9 @@ main() {
             ;;
         funnel-check)
             serve_json_is_our_funnel
+            ;;
+        probe)
+            probe "$@"
             ;;
         *)
             printf 'unknown command: %s\n' "$cmd" >&2
