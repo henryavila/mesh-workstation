@@ -323,11 +323,13 @@ funnel_argv_is_allowed() {
     return 0
 }
 
-# Prints snapshot=ok/lost. Exit 0 only when every top-level TCP key and every
-# top-level Web key in SERVE_BEFORE is still present in SERVE_AFTER.
-# A new key is not a loss. Values are not compared. Port 443 is not required
-# and is not added. Foreground session ids are not compared. Missing or
-# invalid JSON is a loss. This does not exec tailscale.
+# Prints snapshot=ok/lost. Exit 0 only when every TCP key and every Web key
+# in SERVE_BEFORE is still present in SERVE_AFTER with a JSON-equal value.
+# A new key is not a loss. The same rule applies to each Foreground session
+# id from SERVE_BEFORE: the id must remain, and that session's TCP and Web
+# entries must match. A new session id is not a loss. Port 443 is not
+# required and is not added. If SERVE_BEFORE has no Foreground, SERVE_AFTER
+# may omit it. Missing or invalid JSON is a loss. This does not exec tailscale.
 serve_snapshot_keeps_handlers() {
     local result py_rc
     if ! command -v python3 >/dev/null 2>&1; then
@@ -340,28 +342,56 @@ serve_snapshot_keeps_handlers() {
 import json
 import os
 
-def section_keys(node, field):
+def section_map(node, field):
+    if not isinstance(node, dict):
+        return None
     if field not in node or node[field] is None:
-        return set()
+        return {}
     section = node[field]
     if not isinstance(section, dict):
         return None
-    keys = set()
     for key in section:
         if not isinstance(key, str):
             return None
-        keys.add(key)
-    return keys
+    return section
+
+def tcp_web_kept(before, after):
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return False
+    for field in ("TCP", "Web"):
+        old = section_map(before, field)
+        new = section_map(after, field)
+        if old is None or new is None:
+            return False
+        for key, value in old.items():
+            if key not in new or new[key] != value:
+                return False
+    return True
+
+def foreground_kept(before, after):
+    if "Foreground" not in before or before.get("Foreground") is None:
+        if "Foreground" not in after or after.get("Foreground") is None:
+            return True
+        return isinstance(after.get("Foreground"), dict)
+    old_fg = before.get("Foreground")
+    if not isinstance(old_fg, dict):
+        return False
+    if "Foreground" not in after or after.get("Foreground") is None:
+        return len(old_fg) == 0
+    new_fg = after.get("Foreground")
+    if not isinstance(new_fg, dict):
+        return False
+    for sid, old_cfg in old_fg.items():
+        if not isinstance(sid, str) or sid not in new_fg:
+            return False
+        if not tcp_web_kept(old_cfg, new_fg[sid]):
+            return False
+    return True
 
 def kept(before, after):
     if not isinstance(before, dict) or not isinstance(after, dict):
         return False
-    for field in ("TCP", "Web"):
-        old = section_keys(before, field)
-        new = section_keys(after, field)
-        if old is None or new is None or not old <= new:
-            return False
-    return True
+    return tcp_web_kept(before, after) and foreground_kept(before, after)
 
 def main():
     try:

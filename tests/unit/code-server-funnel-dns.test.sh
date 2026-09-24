@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Raw TCP funnel argv and serve-snapshot key retention.
+# Raw TCP funnel argv and serve-snapshot handler retention.
 # Injected JSON and argv only — no live network, no tailscale.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -43,12 +43,24 @@ WEB_443_JSON="{\"TCP\":{\"443\":{\"TCPForward\":\"127.0.0.1:8092\"}},\"AllowFunn
 NO_ALLOW_JSON='{"TCP":{"443":{"TCPForward":"127.0.0.1:8092"}}}'
 PROXY_JSON="{\"TCP\":{\"443\":{\"TCPForward\":\"127.0.0.1:8092\",\"ProxyProtocol\":1}},\"AllowFunnel\":{\"${DNS_NAME}:443\":true}}"
 
-# Passing snapshot keeps the tailnet Web key and does not introduce port 443.
-# AFTER adds a non-443 key and changes a handler value; values are not the check.
+# Passing snapshots keep tailnet TCP and Web values and do not use port 443.
+# AFTER may add a non-443 key or a new Foreground session. Existing values stay equal.
 SNAP_BEFORE="{\"TCP\":{\"8443\":{\"HTTPS\":true}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"}}}}}"
-SNAP_AFTER="{\"TCP\":{\"8443\":{\"HTTPS\":true},\"9443\":{\"HTTPS\":true}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8099\"}}},\"other.example.ts.net:9443\":{\"Handlers\":{\"/\":{\"Text\":\"kept\"}}}}}"
+SNAP_AFTER="{\"TCP\":{\"8443\":{\"HTTPS\":true},\"9443\":{\"HTTPS\":true}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"}}},\"other.example.ts.net:9443\":{\"Handlers\":{\"/\":{\"Text\":\"kept\"}}}}}"
 SNAP_LOST_WEB="{\"TCP\":{\"8443\":{\"HTTPS\":true}},\"Web\":{\"other.example.ts.net:9443\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"}}}}}"
 SNAP_LOST_TCP="{\"TCP\":{},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"}}}}}"
+SNAP_FWD_BEFORE="{\"TCP\":{\"8443\":{\"TCPForward\":\"127.0.0.1:8092\"}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"}}}}}"
+SNAP_FWD_CHANGED="{\"TCP\":{\"8443\":{\"TCPForward\":\"127.0.0.1:1\"}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"}}}}}"
+SNAP_PROXY_CHANGED="{\"TCP\":{\"8443\":{\"HTTPS\":true}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8099\"}}}}}"
+SNAP_PATHS_BEFORE="{\"TCP\":{\"8443\":{\"HTTPS\":true}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"},\"/healthz\":{\"Text\":\"ok\"}}}}}"
+SNAP_PATH_REMOVED="{\"TCP\":{\"8443\":{\"HTTPS\":true}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"}}}}}"
+SNAP_HANDLERS_EMPTY="{\"TCP\":{\"8443\":{\"HTTPS\":true}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{}}}}"
+SNAP_FG_BEFORE="{\"TCP\":{\"8443\":{\"HTTPS\":true}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"}}}},\"Foreground\":{\"sess-a\":{\"TCP\":{\"8443\":{\"TCPForward\":\"127.0.0.1:8092\"}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"},\"/healthz\":{\"Text\":\"ok\"}}}}}}}"
+SNAP_FG_GONE="{\"TCP\":{\"8443\":{\"HTTPS\":true}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"}}}}}"
+SNAP_FG_CHANGED="{\"TCP\":{\"8443\":{\"HTTPS\":true}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"}}}},\"Foreground\":{\"sess-a\":{\"TCP\":{\"8443\":{\"TCPForward\":\"127.0.0.1:8092\"}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8099\"},\"/healthz\":{\"Text\":\"ok\"}}}}}}}"
+SNAP_FG_ADDED="{\"TCP\":{\"8443\":{\"HTTPS\":true}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"}}}},\"Foreground\":{\"sess-b\":{\"TCP\":{\"9443\":{\"HTTPS\":true}}},\"sess-a\":{\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/healthz\":{\"Text\":\"ok\"},\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"}}}},\"TCP\":{\"8443\":{\"TCPForward\":\"127.0.0.1:8092\"}}}}}"
+SNAP_ORDER_BEFORE="{\"TCP\":{\"8443\":{\"HTTPS\":true,\"TCPForward\":\"127.0.0.1:8092\"}},\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"},\"/healthz\":{\"Text\":\"ok\"}}}}}"
+SNAP_ORDER_AFTER="{\"Web\":{\"${WEB_KEY}\":{\"Handlers\":{\"/healthz\":{\"Text\":\"ok\"},\"/\":{\"Proxy\":\"http://127.0.0.1:8091\"}}}},\"TCP\":{\"8443\":{\"TCPForward\":\"127.0.0.1:8092\",\"HTTPS\":true}}}"
 
 expect_funnel() {
     local want_rc="$1" want_line="$2" json="$3" msg="$4"
@@ -141,17 +153,41 @@ expect_argv 1 "funnel-argv=rejected" "raw TCP pointed at 8091 is rejected" \
 expect_argv 1 "funnel-argv=rejected" "flag order other than --bg --yes is rejected" \
     tailscale funnel --yes --bg --tcp=443 tcp://127.0.0.1:8092
 
-# --- snapshot-check: disappearance fails; a new non-443 key does not ---
+# --- snapshot-check: value and foreground loss fail; a new non-443 key does not ---
 assert_not_contains "$SNAP_BEFORE" '"443"' "passing snapshot before has no TCP 443 key"
 assert_not_contains "$SNAP_AFTER" '"443"' "passing snapshot after has no TCP 443 key"
 assert_not_contains "$SNAP_BEFORE" ':443' "passing snapshot before has no :443 web key"
 assert_not_contains "$SNAP_AFTER" ':443' "passing snapshot after has no :443 web key"
+assert_not_contains "$SNAP_FG_BEFORE" '"443"' "preserved foreground fixture has no TCP 443 key"
+assert_not_contains "$SNAP_FG_BEFORE" ':443' "preserved foreground fixture has no :443 web key"
+assert_not_contains "$SNAP_FG_ADDED" '"443"' "foreground with a new session has no TCP 443 key"
+assert_not_contains "$SNAP_FG_ADDED" ':443' "foreground with a new session has no :443 web key"
+assert_not_contains "$SNAP_ORDER_BEFORE" '"443"' "reordered snapshot before has no TCP 443 key"
+assert_not_contains "$SNAP_ORDER_BEFORE" ':443' "reordered snapshot before has no :443 web key"
+assert_not_contains "$SNAP_ORDER_AFTER" '"443"' "reordered snapshot after has no TCP 443 key"
+assert_not_contains "$SNAP_ORDER_AFTER" ':443' "reordered snapshot after has no :443 web key"
 expect_snapshot 0 "snapshot=ok" "$SNAP_BEFORE" "$SNAP_AFTER" \
-    "kept TCP and Web keys pass even when a new non-443 key appears"
+    "kept TCP and Web values pass when a new non-443 key appears"
 expect_snapshot 1 "snapshot=lost" "$SNAP_BEFORE" "$SNAP_LOST_WEB" \
     "losing ${WEB_KEY} is a snapshot loss"
 expect_snapshot 1 "snapshot=lost" "$SNAP_BEFORE" "$SNAP_LOST_TCP" \
     "losing TCP key 8443 is a snapshot loss"
+expect_snapshot 1 "snapshot=lost" "$SNAP_FWD_BEFORE" "$SNAP_FWD_CHANGED" \
+    "changed TCPForward is a snapshot loss"
+expect_snapshot 1 "snapshot=lost" "$SNAP_BEFORE" "$SNAP_PROXY_CHANGED" \
+    "changed Web Proxy is a snapshot loss"
+expect_snapshot 1 "snapshot=lost" "$SNAP_PATHS_BEFORE" "$SNAP_PATH_REMOVED" \
+    "removed handler path is a snapshot loss"
+expect_snapshot 1 "snapshot=lost" "$SNAP_BEFORE" "$SNAP_HANDLERS_EMPTY" \
+    "emptied Handlers object is a snapshot loss"
+expect_snapshot 1 "snapshot=lost" "$SNAP_FG_BEFORE" "$SNAP_FG_GONE" \
+    "disappeared foreground session is a snapshot loss"
+expect_snapshot 1 "snapshot=lost" "$SNAP_FG_BEFORE" "$SNAP_FG_CHANGED" \
+    "changed handler inside a foreground session is a snapshot loss"
+expect_snapshot 0 "snapshot=ok" "$SNAP_FG_BEFORE" "$SNAP_FG_ADDED" \
+    "a new foreground session id is not a snapshot loss"
+expect_snapshot 0 "snapshot=ok" "$SNAP_ORDER_BEFORE" "$SNAP_ORDER_AFTER" \
+    "reordered handler fields stay JSON-equal"
 
 unset_rc=0
 unset_out="$(
@@ -185,7 +221,7 @@ src_out="$(
         bash -uc 'source "$1"; serve_snapshot_keeps_handlers' \
         bash "$SCRIPT" 2>"$TMP/src-snap.err"
 )" || src_rc=$?
-assert_eq "$src_rc" "0" "sourced serve_snapshot_keeps_handlers returns 0 when keys remain"
+assert_eq "$src_rc" "0" "sourced serve_snapshot_keeps_handlers returns 0 when handler values remain"
 assert_eq "$src_out" "snapshot=ok" "sourced snapshot prints snapshot=ok"
 assert_eq "$(cat "$TMP/src-snap.err")" "" "sourced snapshot writes no stderr"
 
