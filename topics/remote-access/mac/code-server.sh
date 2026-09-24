@@ -407,6 +407,16 @@ detect_code_server_env() {
     append_extra_path "/sbin"
 }
 
+# Exactly one uncommented auth line, and that line must be `auth: password`.
+# `auth: none` plus a stale hash is not a healthy config.
+_code_server_effective_auth_is_password() {
+    local file="$1" password_lines auth_lines
+    [[ -f "$file" ]] || return 1
+    password_lines="$(grep -Ec '^[[:space:]]*auth:[[:space:]]*password[[:space:]]*$' "$file" || true)"
+    auth_lines="$(grep -Ec '^[[:space:]]*auth:' "$file" || true)"
+    [[ "$password_lines" == "1" && "$auth_lines" == "1" ]]
+}
+
 install() {
     local HERE
     HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -625,9 +635,23 @@ read_interactive_password() {
     printf '%s' "$first"
 }
 
-choose_code_server_password() {
-    local password
+_code_server_discard_password_file() {
+    local path="$1"
+    [[ -n "$path" && -f "$path" ]] || return 0
+    if command -v shred >/dev/null 2>&1 && shred -u -- "$path" 2>/dev/null; then
+        return 0
+    fi
+    rm -f -- "$path"
+}
 
+choose_code_server_password() {
+    local password generated
+
+    # Only the generate branch fills CODE_SERVER_GENERATED_PASSWORD_FILE.
+    # Interactive entry and CODE_SERVER_PASSWORD leave it empty so the final
+    # summary is not a second copy of a password the operator already has.
+    # The assignment cannot live in this function: write_code_server_config
+    # captures stdout in a subshell, which would drop it.
     if [[ -n "${CODE_SERVER_PASSWORD:-}" ]]; then
         printf '%s' "$CODE_SERVER_PASSWORD"
         return 0
@@ -641,8 +665,13 @@ choose_code_server_password() {
         fi
     fi
 
-    CODE_SERVER_GENERATED_PASSWORD="$(/usr/bin/openssl rand -hex 24)"
-    printf '%s' "$CODE_SERVER_GENERATED_PASSWORD"
+    generated="$(/usr/bin/openssl rand -hex 24)" || return 1
+    [[ -n "$generated" ]] || return 1
+    if [[ -n "${CODE_SERVER_GENERATED_PASSWORD_FILE:-}" ]]; then
+        printf '%s' "$generated" > "$CODE_SERVER_GENERATED_PASSWORD_FILE" || return 1
+    fi
+    printf '%s' "$generated"
+    unset generated
 }
 
 # Hash argv is exactly: npx --yes argon2-cli -e
@@ -658,11 +687,19 @@ hash_code_server_password() {
 }
 
 _code_server_write_hashed_config() {
-    local hashed="$1" tmp old_umask
+    local hashed="$1" tmp old_umask preserved=""
     case "$hashed" in
         \$argon2*) ;;
         *) return 1 ;;
     esac
+    # Migrate in place: drop only the keys this installer owns. A new file
+    # (no previous content) stays the four canonical lines.
+    if [[ -f "$CODE_SERVER_CONFIG_FILE" ]]; then
+        preserved="$(awk '
+            /^[[:space:]]*(bind-addr|auth|hashed-password|password|cert):/ { next }
+            { print }
+        ' "$CODE_SERVER_CONFIG_FILE")" || return 1
+    fi
     old_umask="$(umask)"
     umask 077
     tmp="${CODE_SERVER_CONFIG_FILE}.tmp.$$"
@@ -671,22 +708,50 @@ _code_server_write_hashed_config() {
         printf 'auth: password\n'
         printf 'hashed-password: %s\n' "$hashed"
         printf 'cert: false\n'
+        if [[ -n "$preserved" ]]; then
+            printf '%s\n' "$preserved"
+        fi
     } > "$tmp"
     umask "$old_umask"
     mv "$tmp" "$CODE_SERVER_CONFIG_FILE"
 }
 
 write_code_server_config() {
-    local password hashed
-    password="$(choose_code_server_password)"
+    local password hashed pwfile choose_rc=0
+    # Parent-owned path. choose_code_server_password runs in a command
+    # substitution, so a variable set there would not survive.
+    pwfile="$(mktemp "${TMPDIR:-/tmp}/cs-gen-pw.XXXXXX")" || {
+        followup critical "code-server could not store a generated password outside the hasher subshell."
+        exit 1
+    }
+    chmod 0600 "$pwfile" || true
+    password="$(
+        CODE_SERVER_GENERATED_PASSWORD_FILE="$pwfile" choose_code_server_password
+    )" || choose_rc=$?
+    if [[ -s "$pwfile" ]]; then
+        password="$(cat "$pwfile")"
+        CODE_SERVER_GENERATED_PASSWORD="$password"
+    else
+        CODE_SERVER_GENERATED_PASSWORD=""
+    fi
+    _code_server_discard_password_file "$pwfile"
+    unset pwfile
+    if [[ "$choose_rc" -ne 0 || -z "$password" ]]; then
+        unset password hashed
+        CODE_SERVER_GENERATED_PASSWORD=""
+        followup critical "code-server password generation failed."
+        exit 1
+    fi
     if ! hashed="$(hash_code_server_password "$password")"; then
         unset password hashed
+        CODE_SERVER_GENERATED_PASSWORD=""
         followup critical "code-server password hash failed or did not start with \$argon2 (npx --yes argon2-cli -e)."
         exit 1
     fi
     unset password
     if ! _code_server_write_hashed_config "$hashed"; then
         unset hashed
+        CODE_SERVER_GENERATED_PASSWORD=""
         followup critical "code-server password hash failed or did not start with \$argon2 (npx --yes argon2-cli -e)."
         exit 1
     fi
@@ -803,10 +868,11 @@ ensure_code_server_config() {
     elif _code_server_config_has_plaintext_password "$CODE_SERVER_CONFIG_FILE" \
         || ! _code_server_config_bind_ok "$CODE_SERVER_CONFIG_FILE"; then
         _code_server_rewrite_preserving_secret
-    elif _code_server_config_has_hashed_password "$CODE_SERVER_CONFIG_FILE"; then
+    elif _code_server_config_has_hashed_password "$CODE_SERVER_CONFIG_FILE" \
+        && _code_server_effective_auth_is_password "$CODE_SERVER_CONFIG_FILE"; then
         ok "code-server config already exists at $CODE_SERVER_CONFIG_FILE"
     else
-        if ! grep -Eq '^[[:space:]]*auth:[[:space:]]*password[[:space:]]*$' "$CODE_SERVER_CONFIG_FILE"; then
+        if ! _code_server_effective_auth_is_password "$CODE_SERVER_CONFIG_FILE"; then
             followup critical "code-server config must keep auth: password. Re-run with CODE_SERVER_REWRITE_CONFIG=1 after reviewing $CODE_SERVER_CONFIG_FILE."
             exit 1
         fi
@@ -1296,6 +1362,10 @@ verify() {
         || ! grep -Eq '^[[:space:]]*hashed-password:[[:space:]]*[^[:space:]]' "$CODE_SERVER_CONFIG_FILE" \
         || ! grep -Eq '^[[:space:]]*cert:[[:space:]]*false[[:space:]]*$' "$CODE_SERVER_CONFIG_FILE"; then
         followup critical "code-server config must contain hashed-password and cert: false."
+        return 1
+    fi
+    if ! _code_server_effective_auth_is_password "$CODE_SERVER_CONFIG_FILE"; then
+        followup critical "code-server config must keep auth: password. Re-run with CODE_SERVER_REWRITE_CONFIG=1 after reviewing $CODE_SERVER_CONFIG_FILE."
         return 1
     fi
 

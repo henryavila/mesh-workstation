@@ -8,13 +8,13 @@
 set -uo pipefail
 
 _csl_listener_pid() {
-    local listeners pid
-    listeners="$(lsof -nP -iTCP:8091 -sTCP:LISTEN 2>/dev/null || true)"
+    local listeners pid port="${CODE_SERVER_PORT:-8091}"
+    listeners="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
     [[ -n "$listeners" ]] || return 1
-    pid="$(printf '%s\n' "$listeners" | awk '
+    pid="$(printf '%s\n' "$listeners" | awk -v port="$port" '
         $0 !~ /\(LISTEN\)/ { next }
         {
-            if ($0 !~ /TCP 127\.0\.0\.1:8091 \(LISTEN\)/) bad=1
+            if ($0 !~ ("TCP 127\\.0\\.0\\.1:" port " \\(LISTEN\\)")) bad=1
             else {
                 if (pid != "" && pid != $2) bad=1
                 pid=$2
@@ -31,7 +31,7 @@ _csl_listener_pid() {
 }
 
 _csl_agent_pid() {
-    local label="com.${USER}.code-server" uid out pid
+    local label="${CODE_SERVER_LABEL:-com.${USER}.code-server}" uid out pid
     command -v launchctl >/dev/null 2>&1 || return 1
     uid="$(id -u)"
     out="$(launchctl print "gui/${uid}/${label}" 2>/dev/null)" || return 1
@@ -48,15 +48,18 @@ _csl_agent_pid() {
 }
 
 _csl_healthz_ok() {
-    local code
+    local code port="${CODE_SERVER_PORT:-8091}"
     code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 2 --noproxy '*' \
-        "http://127.0.0.1:8091/healthz" 2>/dev/null || true)"
+        "http://127.0.0.1:${port}/healthz" 2>/dev/null || true)"
     [[ "$code" == "200" ]]
 }
 
 _csl_serve_ok() {
     local status
     status="$(tailscale serve status --json 2>/dev/null)" || return 1
+    # Reject TCP 443, a Web key ending in :443, and the same shapes inside
+    # Foreground. Presence fails even when CODE_SERVER_SERVE_BEFORE already
+    # had that key; a foreground session on another port does not.
     CURRENT_JSON="$status" CODE_SERVER_SERVE_BEFORE="${CODE_SERVER_SERVE_BEFORE:-}" python3 - <<'PY'
 import json, os, sys
 
@@ -77,8 +80,41 @@ def section_keys(data, section):
         raise SystemExit(1)
     return {str(key) for key in val.keys()}
 
+def web_has_443(web):
+    if web is None:
+        return False
+    if not isinstance(web, dict):
+        raise SystemExit(1)
+    for key in web:
+        if str(key).endswith(":443"):
+            return True
+    return False
+
+def mentions_443(cfg):
+    if not isinstance(cfg, dict):
+        return False
+    tcp = cfg.get("TCP")
+    if tcp is not None and not isinstance(tcp, dict):
+        raise SystemExit(1)
+    if isinstance(tcp, dict) and "443" in tcp:
+        return True
+    return web_has_443(cfg.get("Web"))
+
+def forbidden_443(data):
+    if mentions_443(data):
+        return True
+    foreground = data.get("Foreground")
+    if foreground is None:
+        return False
+    if not isinstance(foreground, dict):
+        raise SystemExit(1)
+    for cfg in foreground.values():
+        if not isinstance(cfg, dict) or mentions_443(cfg):
+            return True
+    return False
+
 current = load(os.environ.get("CURRENT_JSON", ""))
-if "443" in section_keys(current, "TCP"):
+if forbidden_443(current):
     raise SystemExit(1)
 
 before_path = os.environ.get("CODE_SERVER_SERVE_BEFORE", "")
@@ -89,8 +125,6 @@ if before_path and os.path.isfile(before_path):
         prev = section_keys(before, section)
         cur = section_keys(current, section)
         if not prev.issubset(cur):
-            raise SystemExit(1)
-        if "443" in cur and "443" not in prev:
             raise SystemExit(1)
 raise SystemExit(0)
 PY

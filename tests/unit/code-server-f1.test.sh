@@ -75,6 +75,26 @@ EOF
 run_install() {
     local home="$1"
     shift
+    # BSD env accepts -u only before name=value assignments. Keep every
+    # unset first, then the optional overrides.
+    local -a env_args=()
+    env_args+=( -u CODE_SERVER_PORT -u CODE_SERVER_TAILSCALE_SERVE )
+    env_args+=( -u BREW_PREFIX -u BREW_BIN -u MESH_IDENTITY_DIR )
+    if [[ -z "${CODE_SERVER_TEST_FOLLOWUP:-}" ]]; then
+        env_args+=( -u MESH_FOLLOWUP_FILE )
+    fi
+    if [[ -z "${CODE_SERVER_TEST_PASSWORD:-}" ]]; then
+        env_args+=( -u CODE_SERVER_PASSWORD )
+    fi
+    if [[ -n "${CODE_SERVER_TEST_FOLLOWUP:-}" ]]; then
+        env_args+=( "MESH_FOLLOWUP_FILE=${CODE_SERVER_TEST_FOLLOWUP}" )
+    fi
+    if [[ -n "${CODE_SERVER_TEST_PASSWORD:-}" ]]; then
+        env_args+=( "CODE_SERVER_PASSWORD=${CODE_SERVER_TEST_PASSWORD}" )
+    fi
+    if [[ -n "${CODE_SERVER_TEST_TMPDIR:-}" ]]; then
+        env_args+=( "TMPDIR=${CODE_SERVER_TEST_TMPDIR}" )
+    fi
     INSTALL_RC=0
     INSTALL_OUT="$(
         HOME="$home" \
@@ -92,8 +112,7 @@ run_install() {
             LAUNCHCTL_LOG="$TMP/launchctl.log" \
             LAUNCHCTL_PID_FILE="${LAUNCHCTL_PID_FILE:-$TMP/no-such-pid}" \
             TS_LOG="$TMP/ts.log" \
-            env -u CODE_SERVER_PORT -u CODE_SERVER_TAILSCALE_SERVE -u CODE_SERVER_PASSWORD \
-                -u BREW_PREFIX -u BREW_BIN -u MESH_FOLLOWUP_FILE -u MESH_IDENTITY_DIR \
+            env "${env_args[@]}" \
             bash -c '. "$1"; install "$@"' _ "$SCRIPT" "$@" 2>&1
     )" || INSTALL_RC=$?
 }
@@ -118,8 +137,15 @@ else
     fail "install wrote config.yaml"
 fi
 assert_file_contains "$cfg" "bind-addr: 127.0.0.1:8091" "fresh config binds 127.0.0.1:8091"
+assert_file_contains "$cfg" "auth: password" "fresh config requires auth password"
 assert_file_contains "$cfg" "hashed-password:" "fresh config stores a hashed-password"
 assert_file_contains "$cfg" "cert: false" "fresh config keeps cert false"
+assert_eq "$(cat "$cfg")" "$(printf '%s\n' \
+    'bind-addr: 127.0.0.1:8091' \
+    'auth: password' \
+    'hashed-password: $argon2id$v=19$m=4096,t=3,p=1$dGVzdHNhbHQ$dGVzdGhhc2g' \
+    'cert: false')" \
+    "fresh config is only the four canonical lines"
 if grep -Eq '^[[:space:]]*password:' "$cfg"; then
     fail "fresh config has no plaintext password line"
 else
@@ -133,6 +159,49 @@ if [[ ${#stdin} -eq 48 && "$stdin" != *$'\n'* ]] && ! grep -qF "$stdin" "$cfg"; 
 else
     fail "hash stdin is the generated password with no trailing newline"
 fi
+
+# Non-interactive fresh install must record the same plaintext that was hashed,
+# and only in the final summary — not in the tee'd topic log.
+mkdir -p "$TMP/gen-pw"
+: > "$TMP/followup"
+HOME_PW="$TMP/home-pw"
+prepare_home "$HOME_PW"
+rm -f "$TMP/npx.argv" "$TMP/npx.stdin" "$TMP/npx.mark"
+CODE_SERVER_TEST_FOLLOWUP="$TMP/followup"
+CODE_SERVER_TEST_TMPDIR="$TMP/gen-pw"
+unset CODE_SERVER_TEST_PASSWORD || true
+run_install "$HOME_PW"
+unset CODE_SERVER_TEST_FOLLOWUP CODE_SERVER_TEST_TMPDIR || true
+pw_stdin="$(cat "$TMP/npx.stdin" 2>/dev/null || true)"
+pw_follow="$(cat "$TMP/followup" 2>/dev/null || true)"
+if [[ "$INSTALL_RC" -eq 0 && ${#pw_stdin} -eq 48 && "$pw_follow" == *"$pw_stdin"* ]]; then
+    pass "non-interactive fresh config records the plaintext that was hashed"
+else
+    fail "non-interactive fresh config records the plaintext that was hashed (rc=$INSTALL_RC)"
+fi
+assert_not_contains "$INSTALL_OUT" "$pw_stdin" "generated password is not written to the topic log"
+assert_not_contains "$(cat "$HOME_PW/.config/code-server/config.yaml")" "$pw_stdin" \
+    "recorded plaintext is not stored in the config"
+pw_left="$(find "$TMP/gen-pw" -type f 2>/dev/null | wc -l | tr -d '[:space:]')"
+assert_eq "$pw_left" "0" "generated password file is shredded or removed"
+
+HOME_OP="$TMP/home-op"
+prepare_home "$HOME_OP"
+: > "$TMP/followup-op"
+rm -f "$TMP/npx.stdin"
+CODE_SERVER_TEST_FOLLOWUP="$TMP/followup-op"
+CODE_SERVER_TEST_PASSWORD="operator-secret-value"
+run_install "$HOME_OP"
+unset CODE_SERVER_TEST_FOLLOWUP CODE_SERVER_TEST_PASSWORD || true
+op_follow="$(cat "$TMP/followup-op" 2>/dev/null || true)"
+op_stdin="$(cat "$TMP/npx.stdin" 2>/dev/null || true)"
+assert_eq "$op_stdin" "operator-secret-value" "operator password is the value that was hashed"
+assert_not_contains "$op_follow" "operator-secret-value" \
+    "operator password is not copied into the generated-password summary"
+assert_not_contains "$op_follow" "Generated code-server password" \
+    "operator password does not take the generated-password summary"
+assert_not_contains "$INSTALL_OUT" "operator-secret-value" \
+    "operator password is not written to the topic log"
 if grep -F -q -- '--disable-proxy' "$wrapper"; then
     pass "service wrapper passes --disable-proxy"
 else
@@ -188,19 +257,38 @@ assert_file_contains "$machine" '"remote.autoForwardPorts": false' "machine sett
             [[ "$before" == "$after" ]] || { printf "bytes changed\n" >&2; exit 1; }
             [[ ! -e "$NPX_MARK" ]] || { printf "npx ran\n" >&2; exit 1; }
 
-            printf "%s\n" "bind-addr: 0.0.0.0:8080" "auth: password" "password: \"s3cret\"" "cert: true" > "$canonical"
+            printf "%s\n" "bind-addr: 0.0.0.0:8080" "auth: password" "password: \"s3cret\"" "cert: true" "proxy-domain: example" "# keep" > "$canonical"
             rm -f "$NPX_MARK" "$NPX_STDIN"
             ensure_code_server_config
             grep -q "bind-addr: 127.0.0.1:8091" "$canonical" || exit 1
             grep -q "hashed-password: \$argon2id" "$canonical" || exit 1
+            grep -q "auth: password" "$canonical" || exit 1
+            grep -q "proxy-domain: example" "$canonical" || exit 1
+            grep -q "# keep" "$canonical" || exit 1
             grep -q "s3cret" "$canonical" && exit 1
+            [[ "$(grep -Ec "^bind-addr:" "$canonical")" -eq 1 ]] || exit 1
+            [[ "$(grep -Ec "^[[:space:]]*auth:" "$canonical")" -eq 1 ]] || exit 1
             [[ "$(cat "$NPX_STDIN")" == "s3cret" ]] || exit 1
 
-            printf "%s\n" "bind-addr: 127.0.0.1:8080" "auth: password" "hashed-password: \$argon2id\$already" "cert: false" > "$canonical"
+            printf "%s\n" "bind-addr: 127.0.0.1:8080" "auth: password" "hashed-password: \$argon2id\$already" "cert: false" "proxy-domain: example" > "$canonical"
             rm -f "$NPX_MARK"
             ensure_code_server_config
             grep -q "hashed-password: \$argon2id\$already" "$canonical" || exit 1
             grep -q "bind-addr: 127.0.0.1:8091" "$canonical" || exit 1
+            grep -q "proxy-domain: example" "$canonical" || exit 1
+            grep -q "auth: password" "$canonical" || exit 1
+            [[ ! -e "$NPX_MARK" ]] || exit 1
+
+            printf "%s\n" "bind-addr: 0.0.0.0:8080" "auth: none" "hashed-password: \$argon2id\$already" "cert: false" "proxy-domain: example" > "$canonical"
+            rm -f "$NPX_MARK"
+            ensure_code_server_config
+            grep -q "bind-addr: 127.0.0.1:8091" "$canonical" || exit 1
+            grep -q "auth: password" "$canonical" || exit 1
+            grep -q "auth: none" "$canonical" && exit 1
+            grep -q "hashed-password: \$argon2id\$already" "$canonical" || exit 1
+            grep -q "proxy-domain: example" "$canonical" || exit 1
+            grep -q "cert: false" "$canonical" || exit 1
+            [[ "$(grep -Ec "^[[:space:]]*auth:" "$canonical")" -eq 1 ]] || exit 1
             [[ ! -e "$NPX_MARK" ]] || exit 1
         ' _ "$SCRIPT"
 ) >"$TMP/migrate.out" 2>"$TMP/migrate.err"
@@ -349,6 +437,81 @@ verify_out="$(
         bash -c '. "$1"; verify' _ "$SCRIPT" 2>&1
 )" || verify_rc=$?
 assert_ne "$verify_rc" "0" "verify fails when hashed-password is missing"
+
+printf '%s\n' 'bind-addr: 127.0.0.1:8091' 'auth: none' 'hashed-password: $argon2id$keep' 'cert: false' > "$cfg"
+verify_rc=0
+verify_out="$(
+    HOME="$HOME_A" \
+        USER="tester" \
+        PATH="$TMP/bin:/usr/bin:/bin" \
+        CODE_SERVER_LABEL="com.tester.code-server" \
+        LSOF_LOG="$TMP/lsof-verify.log" \
+        LSOF_PID="4242" \
+        LAUNCHCTL_LOG="$TMP/launchctl-verify.log" \
+        LAUNCHCTL_PID_FILE="$TMP/agent.pid" \
+        bash -c '. "$1"; verify' _ "$SCRIPT" 2>&1
+)" || verify_rc=$?
+assert_ne "$verify_rc" "0" "verify fails when auth is none"
+assert_contains "$verify_out" "auth: password" "verify names the auth: password requirement"
+
+printf '%s\n' 'bind-addr: 127.0.0.1:8091' 'auth: password' 'auth: password' 'hashed-password: $argon2id$keep' 'cert: false' > "$cfg"
+verify_rc=0
+verify_out="$(
+    HOME="$HOME_A" \
+        USER="tester" \
+        PATH="$TMP/bin:/usr/bin:/bin" \
+        CODE_SERVER_LABEL="com.tester.code-server" \
+        LSOF_LOG="$TMP/lsof-verify.log" \
+        LSOF_PID="4242" \
+        LAUNCHCTL_LOG="$TMP/launchctl-verify.log" \
+        LAUNCHCTL_PID_FILE="$TMP/agent.pid" \
+        bash -c '. "$1"; verify' _ "$SCRIPT" 2>&1
+)" || verify_rc=$?
+assert_ne "$verify_rc" "0" "verify fails unless there is exactly one auth: password line"
+
+printf '%s\n' 'bind-addr: 127.0.0.1:8091' 'hashed-password: $argon2id$keep' 'cert: false' > "$cfg"
+verify_rc=0
+verify_out="$(
+    HOME="$HOME_A" \
+        USER="tester" \
+        PATH="$TMP/bin:/usr/bin:/bin" \
+        CODE_SERVER_LABEL="com.tester.code-server" \
+        LSOF_LOG="$TMP/lsof-verify.log" \
+        LSOF_PID="4242" \
+        LAUNCHCTL_LOG="$TMP/launchctl-verify.log" \
+        LAUNCHCTL_PID_FILE="$TMP/agent.pid" \
+        bash -c '. "$1"; verify' _ "$SCRIPT" 2>&1
+)" || verify_rc=$?
+assert_ne "$verify_rc" "0" "verify fails when the auth line is missing"
+
+printf '%s\n' 'bind-addr: 127.0.0.1:8091' 'auth: password' 'hashed-password: $argon2id$keep' 'cert: false' > "$cfg"
+verify_rc=0
+verify_out="$(
+    HOME="$HOME_A" \
+        USER="tester" \
+        PATH="$TMP/bin:/usr/bin:/bin" \
+        CODE_SERVER_LABEL="com.tester.code-server" \
+        LSOF_LOG="$TMP/lsof-verify.log" \
+        LSOF_PID="4242" \
+        LAUNCHCTL_LOG="$TMP/launchctl-verify.log" \
+        LAUNCHCTL_PID_FILE="$TMP/agent.pid" \
+        bash -c '. "$1"; verify' _ "$SCRIPT" 2>&1
+)" || verify_rc=$?
+assert_eq "$verify_rc" "0" "verify passes for exactly one auth: password line"
+
+HOME_AUTH="$TMP/home-auth"
+prepare_home "$HOME_AUTH"
+mkdir -p "$HOME_AUTH/.config/code-server"
+printf '%s\n' 'bind-addr: 127.0.0.1:8091' 'auth: none' 'hashed-password: $argon2id$keep' 'cert: false' \
+    > "$HOME_AUTH/.config/code-server/config.yaml"
+chmod 0600 "$HOME_AUTH/.config/code-server/config.yaml"
+auth_before="$(cksum "$HOME_AUTH/.config/code-server/config.yaml")"
+run_install "$HOME_AUTH"
+auth_after="$(cksum "$HOME_AUTH/.config/code-server/config.yaml")"
+assert_ne "$INSTALL_RC" "0" "install does not report success when auth is not password"
+assert_not_contains "$INSTALL_OUT" "85-code-server done" "auth: none install does not finish as success"
+assert_not_contains "$INSTALL_OUT" "config already exists" "auth: none is not already good"
+assert_eq "$auth_before" "$auth_after" "auth: none with a good bind and hash is not rewritten"
 
 HOME_B="$TMP/home-b"
 mkdir -p "$HOME_B"
