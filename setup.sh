@@ -429,12 +429,23 @@ detect_brew_if_mac() {
     [[ "$OS" == "mac" ]] || return 0
     if out=$(bash "$HERE/scripts/lib/detect-brew.sh" 2>/dev/null); then
         eval "$out"; export BREW_BIN BREW_PREFIX
+        if [[ -n "${BREW_PREFIX:-}" && ":$PATH:" != *":$BREW_PREFIX/bin:"* ]]; then
+            PATH="$BREW_PREFIX/bin:$BREW_PREFIX/sbin:$PATH"; export PATH
+        fi
     fi
 }
 detect_brew_if_mac
 if [[ "$OS" == "mac" ]]; then
-    if [[ -n "$BREW_BIN" ]]; then info "brew found at $BREW_BIN (prefix $BREW_PREFIX)"
-    else warn "brew not installed yet; the foundation topic will install it"; fi
+    if [[ -n "$BREW_BIN" ]]; then
+        info "brew found at $BREW_BIN (prefix $BREW_PREFIX)"
+    else
+        # Ask here, in this process. The engine below is piped through tee, so
+        # foundation's own prefix prompt never sees a TTY. The answer is exported
+        # as BREW_CUSTOM_PREFIX, which foundation's decision ladder already honors.
+        # shellcheck disable=SC1091
+        source "$HERE/scripts/lib/brew-prefix-offer.sh"
+        offer_separate_brew_prefix || exit 1
+    fi
 fi
 
 # ─── sudo warmup + legacy NOPASSWD cleanup ───────────────────────────────────
