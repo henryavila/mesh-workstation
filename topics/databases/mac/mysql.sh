@@ -77,7 +77,12 @@ _wait_server_running() {
 }
 
 _source_launch_wrapper() {
-    local root="${MESH_WORKSTATION_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+    local root
+    if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "${MESH_WORKSTATION_DIR}/scripts/lib" ]]; then
+        root="${MESH_WORKSTATION_DIR}"
+    else
+        root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+    fi
     # shellcheck disable=SC1091
     . "${root}/scripts/lib/launch-wrapper.sh"
 }

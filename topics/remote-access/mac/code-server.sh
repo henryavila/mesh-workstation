@@ -4,8 +4,7 @@
 
 _code_server_workstation_root() {
     local here root
-    if [[ -n "${MESH_WORKSTATION_DIR:-}" ]]; then
-        [[ -d "$MESH_WORKSTATION_DIR/scripts/lib" ]] || return 1
+    if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "$MESH_WORKSTATION_DIR/scripts/lib" ]]; then
         (cd "$MESH_WORKSTATION_DIR" && pwd -P)
         return
     fi
@@ -320,13 +319,18 @@ PY
 }
 
 install() {
-    local HERE
+    local HERE ws_dir
     HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     HERE="$HERE/.."
+    if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "${MESH_WORKSTATION_DIR}/scripts/lib" ]]; then
+        ws_dir="$MESH_WORKSTATION_DIR"
+    else
+        ws_dir="$(cd "$HERE/../.." && pwd)"
+    fi
     # shellcheck disable=SC1091
-    . "${MESH_WORKSTATION_DIR:-$(cd "$HERE/../.." && pwd)}/scripts/lib/log.sh"
+    . "$ws_dir/scripts/lib/log.sh"
     # shellcheck disable=SC1091
-    . "${MESH_WORKSTATION_DIR:-$(cd "$HERE/../.." && pwd)}/scripts/lib/launch-wrapper.sh"
+    . "$ws_dir/scripts/lib/launch-wrapper.sh"
 
     # Env defaults (preserved from original install.mac.sh header)
     : "${CODE_SERVER_PORT:=8080}"

@@ -40,8 +40,14 @@ check() {
 
 install() {
     if _use_wrapper; then
+        local ws_dir
+        if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "${MESH_WORKSTATION_DIR}/scripts/lib" ]]; then
+            ws_dir="${MESH_WORKSTATION_DIR}"
+        else
+            ws_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+        fi
         # shellcheck disable=SC1091
-        . "${MESH_WORKSTATION_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}/scripts/lib/launch-wrapper.sh"
+        . "$ws_dir/scripts/lib/launch-wrapper.sh"
         local bin="${BREW_PREFIX}/bin/syncthing"
         [[ -x "$bin" ]] || { echo "[syncthing-service-mac] $bin not executable" >&2; return 1; }
         launch_wrapper_install_extbrew \

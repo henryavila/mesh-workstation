@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
+_delta_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "${MESH_WORKSTATION_DIR}/scripts/lib" ]]; then
+    _delta_ws="${MESH_WORKSTATION_DIR}"
+else
+    _delta_ws="$(cd "$_delta_here/../../.." && pwd)"
+fi
 # shellcheck source=/dev/null
-. "${MESH_WORKSTATION_DIR:-$HOME/mesh-workstation}/scripts/lib/github-api.sh"
+. "$_delta_ws/scripts/lib/github-api.sh"
 check() { command -v delta >/dev/null 2>&1; }
 
 install() {

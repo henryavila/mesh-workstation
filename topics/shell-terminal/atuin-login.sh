@@ -46,7 +46,10 @@ install() {
 }
 
 verify() {
-    check
+    # Codex review 2026-05-19: login is advisory / best-effort. If the user
+    # cancelled or has no account, install() already emitted the advisory;
+    # verify() must not abort bootstrap.
+    return 0
 }
 
 repair() { install; }
