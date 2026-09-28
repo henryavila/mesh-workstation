@@ -119,6 +119,12 @@ _prompt_tui() {
             </dev/tty >/dev/tty 2>/dev/tty
     fi
     rc=$?
+    # Clean up terminal state after Ink / Node exits
+    if [ -w /dev/tty ] && [ -r /dev/tty ]; then
+        stty sane </dev/tty 2>/dev/null || true
+        printf '\e[?2004l\e[?1l' >/dev/tty 2>/dev/null || true
+        while read -r -t 0.05 -n 10000 _ < /dev/tty 2>/dev/null; do :; done
+    fi
     [ "$rc" -eq 0 ] || { rm -f "$out"; return 1; }
     cat "$out"; rm -f "$out"
 }
