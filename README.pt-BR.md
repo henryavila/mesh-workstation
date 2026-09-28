@@ -105,6 +105,18 @@ Sob `--no-mesh` / `MESH_NO_MESH=1`:
 - O caminho **sem flag** ainda mantém `personal` / `identity` como locks
   required junto de `foundation/base` e da lista de unlock.
 
+**Atuin: guarde a chave de criptografia.** Após instalar o Atuin, o Mesh mostra
+essa orientação e a repete no resumo final, mesmo se o login ficar para depois.
+Na máquina que já sincroniza, execute `atuin key` e guarde a chave em um campo
+protegido no **Keeper** (ou outro gerenciador de senhas), junto do usuário e da
+senha. Na máquina nova, execute `atuin login -u SEU_USUARIO`, informe a senha e
+**a mesma chave** nos prompts e rode `atuin sync`. O login não usa OAuth pelo
+navegador. Apenas para uma primeira conta, use `atuin register -u SEU_USUARIO
+-e SEU_EMAIL` e depois `atuin key`, guardando a chave imediatamente. O Mesh não
+faz backup automático dessa chave; se todas as cópias forem perdidas, o servidor
+não poderá recuperá-la. Não coloque a chave no Git, em chats ou logs de instalação.
+`--no-mesh` pula essa orientação de sincronização.
+
 **Modo automação / CI** (sem menu — env vars e flags):
 
 ```bash

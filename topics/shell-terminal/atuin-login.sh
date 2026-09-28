@@ -41,8 +41,9 @@ install() {
         echo "[atuin-login] no controlling TTY — skipping inline login. Run 'atuin login' when ready." >&2
         return 0
     fi
+    echo "[atuin-login] Use your existing Atuin username, password and encryption key. Retrieve the key with 'atuin key' on a machine that already syncs; save it in a password manager such as Keeper." >&2
     atuin login </dev/tty \
-        || echo "[atuin-login] login did not complete (user cancelled or OAuth failed). Re-run 'atuin login' to retry." >&2
+        || echo "[atuin-login] login did not complete (cancelled or authentication failed). Re-run 'atuin login' to retry." >&2
 }
 
 verify() {

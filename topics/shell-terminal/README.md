@@ -7,7 +7,34 @@ Modern terminal, **fully themed out of the box** — font, color scheme, and she
 **CLI stack (both platforms):** `fzf bat eza zoxide ripgrep fd starship lazygit git-delta tmux neovim`
 **Modern-CLI replacements:** `btop duf gping sd tealdeer dust xh procs`
 **zsh plugins:** completions, autosuggestions, syntax-highlighting, history-substring-search, fzf-tab, forgit, alias-tips, zsh-abbr, **Powerlevel10k** (+ zinit for turbo loading)
-**History engine:** atuin (manual first-run: `atuin login` — opens browser for OAuth against atuin.sh; no password or 24-word key on the CLI)
+**History engine:** Atuin (cross-machine sync requires an account password and encryption key; see below).
+
+## Atuin account and key backup
+
+After Atuin installation, Mesh displays key-backup guidance and repeats it in
+the final follow-up summary. This also runs when login is deferred, when Atuin
+is already installed, or when only `shell-terminal/cli-tools` is selected.
+`--no-mesh` skips sync onboarding.
+
+For an existing account, run `atuin key` on a machine that already syncs.
+Save the key in a protected field in **Keeper** (or another password manager),
+alongside your username and password. On the new machine:
+
+```bash
+atuin login -u YOUR_USERNAME
+atuin sync
+```
+
+Enter the password and the **same encryption key** at the prompts. Login does
+not use browser OAuth. Avoid passing secrets as command-line arguments.
+
+For a first account only, run `atuin register -u YOUR_USERNAME -e YOUR_EMAIL`,
+then `atuin key` and save the key immediately. Do not register a new account
+for each machine. Atuin stores the key locally; Mesh does not back it up or
+replicate it automatically. Never put the key in Git, chat or installation
+logs. If all copies are lost, the server cannot recover it.
+
+Reference: [Atuin sync setup](https://docs.atuin.sh/guide/sync/).
 
 ## Terminal emulator auto-config
 

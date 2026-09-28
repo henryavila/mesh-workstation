@@ -151,6 +151,10 @@ bundles:
         script: ./wsl/install-atuin.sh
         platforms: [wsl]
         soft_fail: true
+      - name: atuin-key-guidance
+        type: custom
+        script: ./atuin-key-guidance.sh
+        idempotent: true
       - name: rust-bins-wsl
         type: custom
         script: ./wsl/install-rust-bins.sh
