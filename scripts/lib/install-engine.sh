@@ -100,6 +100,9 @@ export MESH_LIB_DIR="$ENGINE_DIR"
 . "$ENGINE_DIR/log.sh"
 # shellcheck disable=SC1091
 . "$ENGINE_DIR/env.sh"
+if [[ -z "${MESH_WORKSTATION_DIR:-}" || ! -d "${MESH_WORKSTATION_DIR}" ]]; then
+    export MESH_WORKSTATION_DIR="$(cd "$ENGINE_DIR/../.." && pwd)"
+fi
 # shellcheck disable=SC1091
 . "$ENGINE_DIR/install-state.sh"
 # shellcheck disable=SC1091

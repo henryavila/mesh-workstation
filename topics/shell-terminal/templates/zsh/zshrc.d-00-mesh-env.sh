@@ -14,8 +14,12 @@ export MESH_TMUX_AUTO_MAIN=0
 # Load per-host config (~/.config/mesh/config.env) when neither mesh dir is
 # set yet. The config file is shell-sourceable (key=value lines) and may set
 # MESH_WORKSTATION_DIR, MESH_IDENTITY_DIR, AUTO_UPDATE_REPOS, etc.
-if [[ -z "${MESH_WORKSTATION_DIR:-}" && -z "${MESH_IDENTITY_DIR:-}" ]]; then
+if [[ -z "${MESH_WORKSTATION_DIR:-}" || -z "${MESH_IDENTITY_DIR:-}" ]]; then
     [[ -r "$HOME/.config/mesh/config.env" ]] && . "$HOME/.config/mesh/config.env"
+fi
+
+if [[ -n "${MESH_WORKSTATION_DIR:-}" && ! -d "${MESH_WORKSTATION_DIR}" ]]; then
+    unset MESH_WORKSTATION_DIR
 fi
 
 # MESH_WORKSTATION_DIR auto-derived from the ~/.local/bin/mesh symlink that

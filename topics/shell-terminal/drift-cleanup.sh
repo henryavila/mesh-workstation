@@ -12,7 +12,13 @@ check() {
 install() {
     local here ws_lib
     here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    ws_lib="${MESH_WORKSTATION_DIR:-$(cd "$here/../.." && pwd)}/scripts/lib"
+    if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "${MESH_WORKSTATION_DIR}/scripts/lib" ]]; then
+        ws_lib="${MESH_WORKSTATION_DIR}/scripts/lib"
+    else
+        ws_lib="$(cd "$here/../.." && pwd)/scripts/lib"
+    fi
+    # shellcheck disable=SC1091
+    . "$ws_lib/log.sh"
     # shellcheck disable=SC1091
     . "$ws_lib/topic-cleanup.sh"
     uninstall_apply "$here/data/uninstall.list"
