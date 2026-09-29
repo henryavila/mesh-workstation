@@ -409,13 +409,20 @@ if [[ "$sudo_needed" -eq 1 ]]; then
     # when %sudo requires a password (verifypw=all), even with NOPASSWD:ALL.
     if sudo -n true >/dev/null 2>&1; then
         :
-    elif [[ "${NON_INTERACTIVE:-0}" != "1" ]] && [[ -t 0 && -t 1 ]]; then
-        if ! sudo -v; then
-            fail "deploy.sh: sudo not available / denied"
+    elif [[ "${NON_INTERACTIVE:-0}" == "1" ]]; then
+        fail "deploy.sh: sudo authentication required, but NON_INTERACTIVE=1 disables password prompts"
+        fail "Run sudo -v in your terminal, then re-run the installation in that same terminal."
+        exit 1
+    elif ( : </dev/tty ) 2>/dev/null; then
+        # setup.sh pipes the engine through tee: stdout is not a TTY even
+        # when an operator is present. Use the controlling terminal for sudo.
+        if ! sudo -v </dev/tty; then
+            fail "deploy.sh: sudo authentication failed or was cancelled; re-run and authorize sudo to deploy system files"
             exit 1
         fi
     else
-        fail "deploy.sh: sudo not available / denied"
+        fail "deploy.sh: sudo authentication required, but no controlling terminal is available"
+        fail "Run the installation from an interactive terminal and authorize sudo when prompted."
         exit 1
     fi
 fi

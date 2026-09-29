@@ -64,16 +64,19 @@ check() {
 
 _code_server_uninstall_clear_tailscale_serve() {
     local port="$1" status state reset_rc=0
+    local PATH="$HOME/.local/bin:$PATH"
+    local required=0
+    [[ ! -f "$HOME/.local/state/code-server/serve-port" ]] || required=1
 
     [[ "${CODE_SERVER_TAILSCALE_SERVE:-1}" == "1" ]] || return 0
-    command -v tailscale >/dev/null 2>&1 || return 0
+    command -v tailscale >/dev/null 2>&1 || return "$required"
 
-    status="$(tailscale serve status --json 2>/dev/null)" || return 0
-    [[ -n "$status" ]] || return 0
+    status="$(tailscale serve status --json 2>/dev/null)" || return "$required"
+    [[ -n "$status" ]] || return "$required"
 
     if ! command -v python3 >/dev/null 2>&1; then
         printf 'code-server uninstall: python3 unavailable; leaving Tailscale Serve config untouched\n' >&2
-        return 0
+        return "$required"
     fi
 
     state="$(CODE_SERVER_PORT="$port" TS_STATUS_JSON="$status" python3 - <<'PY'
@@ -129,8 +132,12 @@ PY
                 return "$reset_rc"
             fi
             ;;
+        unknown)
+            return "$required"
+            ;;
         mixed)
             printf 'code-server uninstall: Tailscale Serve has other handlers; leaving Serve config untouched\n' >&2
+            return "$required"
             ;;
     esac
     return 0
@@ -207,7 +214,20 @@ uninstall() {
         fi
     fi
 
-    _code_server_uninstall_clear_tailscale_serve "$port" || rc=$?
+    local saved_port
+    saved_port="$(sed -nE 's/^[[:space:]]*bind-addr:[[:space:]]*127\.0\.0\.1:([0-9]+)[[:space:]]*$/\1/p' "$config_dir/config.yaml" 2>/dev/null || true)"
+    [[ "$saved_port" =~ ^[0-9]+$ ]] && port="$saved_port"
+    local served_port
+    served_port="$(cat "$state_dir/serve-port" 2>/dev/null || true)"
+    [[ "$served_port" =~ ^[0-9]+$ ]] && port="$served_port"
+    # Keep runtime/config/state available if cleanup fails so it can be retried.
+    if _code_server_uninstall_clear_tailscale_serve "$port"; then
+        :
+    else
+        rc=$?
+        printf 'code-server uninstall: Serve cleanup incomplete; preserving config and state for retry\n' >&2
+        return "$rc"
+    fi
 
     rm -f "$plist" "$wrapper" "$bin" 2>/dev/null || rc=1
     for dir in "$prefix/lib/code-server" "$prefix"/lib/code-server-* "$config_dir" "$state_dir"; do
@@ -331,6 +351,8 @@ install() {
     . "$ws_dir/scripts/lib/log.sh"
     # shellcheck disable=SC1091
     . "$ws_dir/scripts/lib/launch-wrapper.sh"
+    . "$ws_dir/scripts/lib/code-server-port.sh"
+    . "$ws_dir/scripts/lib/tailscale-cli.sh"
 
     # Env defaults (preserved from original install.mac.sh header)
     : "${CODE_SERVER_PORT:=8080}"
@@ -670,6 +692,10 @@ ensure_code_server_config() {
             followup info "code-server password was saved in $CODE_SERVER_CONFIG_FILE (mode 0600)."
         fi
     else
+        # Existing config is authoritative, including a previously allocated port.
+        local saved_port
+        saved_port="$(sed -nE 's/^[[:space:]]*bind-addr:[[:space:]]*127\.0\.0\.1:([0-9]+)[[:space:]]*$/\1/p' "$CODE_SERVER_CONFIG_FILE")"
+        [[ "$saved_port" =~ ^[0-9]+$ ]] && CODE_SERVER_PORT="$saved_port"
         ok "code-server config already exists at $CODE_SERVER_CONFIG_FILE"
         if ! grep -Eq "^[[:space:]]*bind-addr:[[:space:]]*127\\.0\\.0\\.1:${CODE_SERVER_PORT}[[:space:]]*$" "$CODE_SERVER_CONFIG_FILE"; then
             followup critical "code-server config must bind only to 127.0.0.1:${CODE_SERVER_PORT}. Re-run with CODE_SERVER_REWRITE_CONFIG=1 after reviewing $CODE_SERVER_CONFIG_FILE."
@@ -863,6 +889,10 @@ verify_local_only_listener() {
         return 1
     fi
 
+    if ! code_server_owns_listener; then
+        followup critical "port $CODE_SERVER_PORT is not owned by the code-server LaunchAgent; refusing to configure Tailscale Serve for another process. Re-run the installer to allocate a free port."
+        return 1
+    fi
     ok "code-server listener is loopback-only on 127.0.0.1:${CODE_SERVER_PORT}"
 }
 
@@ -939,6 +969,10 @@ print_tailscale_code_server_url() {
 maybe_configure_tailscale_serve() {
     [[ "$CODE_SERVER_TAILSCALE_SERVE" == "1" ]] || return 0
 
+    if ! mesh_tailscale_cli; then
+        followup manual "Tailscale CLI is unavailable; install or launch Tailscale.app and re-run this installation."
+        return 0
+    fi
     if ! PATH="${CODE_SERVER_INSTALL_PREFIX}/bin:${CODE_SERVER_EXTRA_PATH}" command -v tailscale >/dev/null 2>&1; then
         followup manual "CODE_SERVER_TAILSCALE_SERVE=1, but tailscale is not on PATH. Configure Serve manually after Tailscale is installed."
         return 0
@@ -952,19 +986,30 @@ maybe_configure_tailscale_serve() {
     local status_out status_rc state
     status_out="$(PATH="${CODE_SERVER_INSTALL_PREFIX}/bin:${CODE_SERVER_EXTRA_PATH}" tailscale serve status --json 2>&1)" || status_rc=$?
     status_rc="${status_rc:-0}"
+    if [[ "$status_rc" -ne 0 ]]; then
+        followup manual "Could not read Tailscale Serve status (rc=$status_rc); leaving its configuration unchanged."
+        return 0
+    fi
     state="$(tailscale_serve_state "$status_out")"
 
     case "$state" in
         desired)
             ok "Tailscale Serve already proxies / to 127.0.0.1:$CODE_SERVER_PORT"
+            printf '%s\n' "$CODE_SERVER_PORT" > "$CODE_SERVER_STATE_DIR/serve-port"
             print_tailscale_code_server_url
             return 0
             ;;
         empty)
             ;;
         other)
-            followup manual "Tailscale Serve already has handlers; not overwriting automatically. Review 'tailscale serve status' and add code-server manually if appropriate."
-            return 0
+            local previous_port
+            previous_port="$(cat "$CODE_SERVER_STATE_DIR/serve-port" 2>/dev/null || true)"
+            if [[ "$previous_port" =~ ^[0-9]+$ ]] && code_server_managed_serve_matches "$status_out" "$previous_port"; then
+                info "updating the managed Tailscale Serve proxy to port $CODE_SERVER_PORT"
+            else
+                followup manual "Tailscale Serve already has handlers; not overwriting automatically. Review 'tailscale serve status' and add code-server manually if appropriate."
+                return 0
+            fi
             ;;
         *)
             followup manual "Could not parse 'tailscale serve status --json' (rc=$status_rc); not changing Serve config automatically."
@@ -979,6 +1024,7 @@ maybe_configure_tailscale_serve() {
     state="$(tailscale_serve_state "$status_out")"
     if [[ "$state" == "desired" ]]; then
         ok "Tailscale Serve proxies / to 127.0.0.1:$CODE_SERVER_PORT"
+        printf '%s\n' "$CODE_SERVER_PORT" > "$CODE_SERVER_STATE_DIR/serve-port"
         print_tailscale_code_server_url
     else
         followup manual "Tailscale Serve command finished, but validation did not find the expected root proxy. Check 'tailscale serve status'."
@@ -1047,6 +1093,7 @@ require_macos
 detect_code_server_env
 install_code_server_standalone
 ensure_code_server_config
+code_server_allocate_port || return 1
 remove_legacy_codex_compat_shim
 write_code_server_machine_settings
 write_code_server_service_wrapper
@@ -1067,7 +1114,10 @@ wait_for_healthz || _cs_fail=1
 verify_local_only_listener || _cs_fail=1
 
 deploy_user_settings_from_identity
-maybe_configure_tailscale_serve
+# Never publish a port until health AND LaunchAgent ownership are verified.
+if [[ "$_cs_fail" -eq 0 ]]; then
+    maybe_configure_tailscale_serve
+fi
 
 if [[ "$_cs_fail" -ne 0 ]]; then
     warn "85-code-server: server did not come up healthy and loopback-only — reporting install failure (see the messages above)"
@@ -1077,14 +1127,17 @@ ok "85-code-server done"
 }
 
 verify() {
-    # Kept to check() (binary + plist + config on disk). A live healthz/listener
-    # assertion here would need detect_code_server_env's CODE_SERVER_* vars
-    # re-resolved in this separate verify subshell (they are set only inside
-    # install()); getting that wrong would rc=67 a healthy install. install()
-    # now reports a real failure when the server does not come up (see _cs_fail),
-    # which covers the fresh-install case; ongoing liveness is owned by
-    # `mesh code-server status` / `mesh code-server verify`.
-    check
+    check || return 1
+    local root config saved_port
+    root="$(_code_server_workstation_root)" || return 1
+    . "$root/scripts/lib/code-server-port.sh"
+    config="$HOME/.config/code-server/config.yaml"
+    saved_port="$(sed -nE 's/^[[:space:]]*bind-addr:[[:space:]]*127\.0\.0\.1:([0-9]+)[[:space:]]*$/\1/p' "$config")"
+    [[ "$saved_port" =~ ^[0-9]+$ ]] || return 1
+    local CODE_SERVER_PORT="$saved_port"
+    local CODE_SERVER_LABEL="${CODE_SERVER_LABEL:-com.${USER}.code-server}"
+    code_server_owns_listener || return 1
+    curl -fsS --max-time 2 "http://127.0.0.1:$CODE_SERVER_PORT/healthz" >/dev/null 2>&1
 }
 repair() { install; }
 

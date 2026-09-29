@@ -22,7 +22,23 @@ check() {
 }
 
 install() {
-    sudo systemsetup -setremotelogin on
+    local output rc=0
+    if output="$(sudo systemsetup -setremotelogin on 2>&1)"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    [[ -z "$output" ]] || printf '%s\n' "$output" >&2
+
+    if [[ "$output" == *"requires Full Disk Access privileges"* ]]; then
+        printf '%s\n' \
+            '[remote-login-mac] macOS blocked enabling Remote Login: Full Disk Access is required by systemsetup, even with sudo.' \
+            '[remote-login-mac] Open System Settings > General > Sharing > Remote Login and turn it on, then re-run this installation.' \
+            '[remote-login-mac] Em portugues: Ajustes do Sistema > Geral > Compartilhamento > Login Remoto. Ative a opcao e execute novamente a instalacao.' >&2
+        # Some systemsetup versions report errors with a successful exit status.
+        [[ "$rc" -ne 0 ]] || rc=1
+    fi
+    return "$rc"
 }
 
 verify() {

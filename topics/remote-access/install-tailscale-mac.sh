@@ -10,14 +10,24 @@
 # which fails silently when brew runs /usr/sbin/installer under sudo. In
 # that case, instructions for the .pkg fallback are emitted.
 
+_tailscale_cli_load() {
+    local root
+    root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)" || return 1
+    . "$root/scripts/lib/tailscale-cli.sh"
+}
+
 check() {
-    [[ -d /Applications/Tailscale.app ]] && return 0
+    local cli
+    cli="$(PATH="$HOME/.local/bin:$PATH" type -P tailscale 2>/dev/null || true)"
+    [[ -n "$cli" && -x "$cli" ]] || return 1
+    [[ -d /Applications/Tailscale.app || -d "$HOME/Applications/Tailscale.app" ]] && return 0
     "${BREW_BIN:-brew}" list --cask tailscale >/dev/null 2>&1
 }
 
 install() {
-    if [[ -d /Applications/Tailscale.app ]]; then
-        return 0
+    if [[ -d /Applications/Tailscale.app || -d "$HOME/Applications/Tailscale.app" ]]; then
+        _tailscale_cli_load && mesh_tailscale_cli
+        return $?
     fi
     if ! "${BREW_BIN:-brew}" install --cask tailscale; then
         echo "[tailscale-mac] brew install --cask tailscale failed — likely kext approval" >&2
@@ -26,6 +36,7 @@ install() {
         echo "[tailscale-mac]      then re-run this topic; it'll detect Tailscale.app already installed" >&2
         return 1
     fi
+    _tailscale_cli_load && mesh_tailscale_cli
 }
 
 verify() {
