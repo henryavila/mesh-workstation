@@ -11,11 +11,11 @@ Modern terminal, **fully themed out of the box** — font, color scheme, and she
 
 ## Terminal emulator auto-config
 
-Both supported emulators are pre-configured during bootstrap — users do **not** need to pick a theme or font manually.
+Bootstrap prepares terminal configuration and makes **Mesh — Nerd Font** the default iTerm2 profile. If iTerm2 is open, a one-shot user LaunchAgent applies the default after you fully quit it normally (checks every 10 seconds); reopen afterward. Mesh never closes sessions.
 
 | Platform | Emulator | Font | Color scheme | Config script |
 |---|---|---|---|---|
-| macOS | iTerm2 | CaskaydiaCove Nerd Font | Catppuccin (set on first theme switch) | `scripts/configure-iterm2-font.sh` (PlistBuddy surgical edit of `New Bookmarks`) |
+| macOS | iTerm2 | CaskaydiaCove Nerd Font Mono | Inherits the default profile | `scripts/configure-iterm2-font.sh` (managed dynamic profile; verifies macOS font registration) |
 | WSL (Windows) | Windows Terminal | CaskaydiaCove Nerd Font (user-level install via PowerShell) | **Catppuccin Mocha** (appended to `schemes[]`, set via `profiles.defaults`) | `scripts/configure-windows-terminal.sh` + `install-nerd-font.ps1` |
 
 Both scripts are **idempotent** and **non-destructive**:
@@ -52,5 +52,30 @@ bundle in the Blink menu / `selections.list`), then open a new shell.
 ## Customization
 
 - **Theme change:** edit `templates/cli-tools/starship.toml` (bash prompt) or your personal `~/.p10k.zsh` (zsh prompt) and re-apply with `bash setup.sh --non-interactive --bundle shell-terminal/cli-tools` (and `--bundle shell-terminal/zsh` if you also changed zsh/p10k wiring).
-- **Different font:** override `NF_PS_NAME` in `configure-iterm2-font.sh` / adjust the `font.face` in `scripts/wt-settings-fragment.json`.
+- **Different font:** export `NF_PS_NAME` with the installed PostScript font name before running the iTerm2 configurator; Windows Terminal uses `font.face` in `scripts/wt-settings-fragment.json`.
 - **Skip terminal auto-config:** the two scripts are each gated by `-x` checks in `install.*.sh`; remove the corresponding block if you prefer to manage the emulator by hand.
+
+### iTerm2 font verification
+
+Mesh writes only `~/Library/Application Support/iTerm2/DynamicProfiles/mesh-font.json`.
+It inherits the default profile and preserves its font size, while selecting
+`CaskaydiaCoveNFM-Regular` for ASCII and other glyphs. Existing profiles and open
+sessions are not rewritten or closed. CoreText must resolve the exact font name;
+a fallback such as Helvetica is an error, even if the font file exists.
+The managed profile and saved default are validated separately from active sessions.
+The setup summary distinguishes an applied default from a deferred update.
+The one-shot helper lives under `~/.local/lib/mesh/`; its LaunchAgent removes itself
+after preference readback succeeds. Errors retry and log to
+`~/.local/state/mesh/iterm2-default.err`. `--check` is read-only: it verifies either the saved default or the exact
+managed helper and loaded one-shot job, explicitly reporting pending activation. Custom iTerm2 preference folders are rejected
+explicitly rather than silently changing an unused local domain.
+This replaces direct plist edits that could race iTerm2's in-memory preferences.
+
+Personal iTerm2 preferences can be stored in `${MESH_IDENTITY_DIR:-$HOME/mesh-identity}/iterm2/font.json`:
+
+```json
+{"font_size": 20, "ligatures": true}
+```
+
+Both settings are optional; font size must be 6–96 points and ligatures a boolean.
+They affect the managed Mesh profile, including ASCII and non-ASCII font settings.
