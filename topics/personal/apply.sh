@@ -86,6 +86,12 @@ install() { (
 
     identity_ensure_repo "${MESH_IDENTITY_REPO:-}" "$MESH_IDENTITY_DIR"
 
+    # Public-key enrollment belongs after the private repo exists and before
+    # deployment: recipients consume this committed trust list on identity update.
+    # Never silently call onboarding complete when publication failed.
+    local enroll_lib="$HERE/../../scripts/lib/ssh-enroll.py"
+    python3 "$enroll_lib" --repo "$MESH_IDENTITY_DIR" || return 1
+
     if [[ -f "$MESH_IDENTITY_DIR/install.sh" ]]; then
         info "running $MESH_IDENTITY_DIR/install.sh"
         MESH_NPM_GLOBAL="${MESH_NPM_GLOBAL:-0}" bash "$MESH_IDENTITY_DIR/install.sh"
@@ -97,7 +103,8 @@ install() { (
     # does. Reads data/uninstall.list and removes each entry. Idempotent.
     uninstall_apply "$HERE/data/uninstall.list"
 
-    ok "personal identity done"
+    python3 "$enroll_lib" --repo "$MESH_IDENTITY_DIR" --report-peers || return 1
+    ok "personal identity done (see SSH peer delivery follow-ups)"
 ) }
 
 verify() {
