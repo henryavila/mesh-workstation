@@ -137,3 +137,26 @@ The broader pattern: non-interactive SSH on macOS (`ssh user@mac '<cmd>'`) doesn
 If you don't use Tailscale or mosh, leave those bundles unchecked in Blink (or
 omit `--bundle remote-access/*`). Guests using `--no-mesh` never see the
 membership Tailscale/code-server rows.
+
+## macOS code-server port and Tailscale CLI
+
+The installer reuses the loopback port saved in `~/.config/code-server/config.yaml`.
+If another process owns that port, it chooses the first free port in the next
+100-port range (up to 65535), saves it, and preserves the password and other
+settings with a private backup. Port probing requires Python 3; listener
+ownership verification requires `lsof`. The default for a new config is 8080.
+An existing config is authoritative; `CODE_SERVER_REWRITE_CONFIG=1` remains
+an explicit full-config rewrite, including password configuration.
+
+The health check verifies that the listener belongs to the managed LaunchAgent
+or its descendants before configuring Tailscale Serve. An unrelated application
+is never stopped. A competing bind after port selection fails validation; rerun
+the installer to select again. A saved, dedicated Mesh Serve route on HTTPS 443
+can follow the new port; unrelated Serve routes are preserved.
+
+When the macOS app is installed without CLI integration, Mesh creates
+`~/.local/bin/tailscale`, a wrapper around the app executable with
+`TAILSCALE_BE_CLI=1`. Mesh shell profiles already include that directory in PATH;
+the installer also adds it to its current environment. Existing executable CLIs
+are preserved. This works for `/Applications/Tailscale.app` and the user's
+`~/Applications/Tailscale.app`. See the [official CLI documentation](https://tailscale.com/docs/reference/tailscale-cli?tab=macos).

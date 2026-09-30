@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
+_rtk_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "${MESH_WORKSTATION_DIR}/scripts/lib" ]]; then
+    _rtk_ws="${MESH_WORKSTATION_DIR}"
+else
+    _rtk_ws="$(cd "$_rtk_here/../.." && pwd)"
+fi
 # shellcheck source=/dev/null
-. "${MESH_WORKSTATION_DIR:-$HOME/mesh-workstation}/scripts/lib/github-api.sh"
+. "$_rtk_ws/scripts/lib/github-api.sh"
 # Custom installer for rtk (Rust Token Killer).
 # Engine sources this file inside a subshell and calls install(), check(),
 # verify(), rollback() via the custom driver contract.

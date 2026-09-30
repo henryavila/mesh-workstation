@@ -9,7 +9,9 @@
 #      install fresh at the recorded prefix (method=state_replay).
 #   3. `BREW_CUSTOM_PREFIX` env var is set — install there (method=env_var).
 #   4. Interactive TTY — prompt with default = /opt/homebrew, allow custom
-#      path entry (method=prompt).
+#      path entry (method=prompt). Unreachable from `bash setup.sh`: the engine
+#      is piped through tee, so this process has no TTY. setup.sh asks first
+#      (scripts/lib/brew-prefix-offer.sh) and exports BREW_CUSTOM_PREFIX.
 #   5. Non-interactive context — silent default /opt/homebrew + warn that
 #      the user can override on next run via env var (method=default).
 #

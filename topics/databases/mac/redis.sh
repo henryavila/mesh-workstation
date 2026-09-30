@@ -28,8 +28,14 @@ check() {
 install() {
     "${BREW_BIN:-brew}" list --formula redis >/dev/null 2>&1 || "${BREW_BIN:-brew}" install redis
     if _use_wrapper; then
+        local ws_dir
+        if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "${MESH_WORKSTATION_DIR}/scripts/lib" ]]; then
+            ws_dir="${MESH_WORKSTATION_DIR}"
+        else
+            ws_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+        fi
         # shellcheck disable=SC1091
-        . "${MESH_WORKSTATION_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}/scripts/lib/launch-wrapper.sh"
+        . "$ws_dir/scripts/lib/launch-wrapper.sh"
         launch_wrapper_install_extbrew \
             --svc redis \
             --label "com.${USER}.redis" \
@@ -76,8 +82,14 @@ uninstall() {
     #    launch_wrapper_install_extbrew). Non-wrapper path stops the brew service
     #    so `brew uninstall` isn't fighting a live daemon.
     if _use_wrapper; then
+        local ws_dir
+        if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "${MESH_WORKSTATION_DIR}/scripts/lib" ]]; then
+            ws_dir="${MESH_WORKSTATION_DIR}"
+        else
+            ws_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+        fi
         # shellcheck disable=SC1091
-        . "${MESH_WORKSTATION_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}/scripts/lib/launch-wrapper.sh"
+        . "$ws_dir/scripts/lib/launch-wrapper.sh"
         launch_wrapper_teardown "com.${USER}.redis" 2>/dev/null || true
     else
         command -v "$brew" >/dev/null 2>&1 && "$brew" services stop redis >/dev/null 2>&1 || true

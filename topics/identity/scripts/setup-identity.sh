@@ -71,6 +71,20 @@ else
             clipboard_flag="--clipboard"
         fi
 
+        # Reset terminal state and flush any lingering escape sequences / OSC responses
+        # left in /dev/tty from earlier Node.js (Ink) TUI menus or terminal queries.
+        # Without this, gh's Go survey library encounters \x1b] and crashes with:
+        # "unexpected escape sequence from terminal: ['\x1b' ']']".
+        if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+            stty sane </dev/tty 2>/dev/null || true
+            printf '\e[?2004l\e[?1l' >/dev/tty 2>/dev/null || true
+            while read -r -t 0.1 -n 10000 _ < /dev/tty 2>/dev/null; do :; done
+        fi
+
+        # Pre-configure git credentials helper so gh auth login does not prompt
+        # "? Authenticate Git with your GitHub credentials? (Y/n)"
+        gh auth setup-git -f -h github.com >/dev/null 2>&1 || true
+
         if ! gh auth login --web ${clipboard_flag:+$clipboard_flag} \
                 --git-protocol https \
                 --scopes "admin:public_key,repo" \

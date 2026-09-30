@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
+_mkcert_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "${MESH_WORKSTATION_DIR}/scripts/lib" ]]; then
+    _mkcert_ws="${MESH_WORKSTATION_DIR}"
+else
+    _mkcert_ws="$(cd "$_mkcert_here/../../.." && pwd)"
+fi
 # shellcheck source=/dev/null
-. "${MESH_WORKSTATION_DIR:-$HOME/mesh-workstation}/scripts/lib/github-api.sh"
+. "$_mkcert_ws/scripts/lib/github-api.sh"
 # Custom: mkcert + wildcard cert + Windows trust store import.
 
 CERT_DIR="${CERT_DIR:-/etc/nginx/certs}"

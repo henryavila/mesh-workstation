@@ -85,6 +85,8 @@ for editor_var in MESH_CONFIG_EDITOR VISUAL EDITOR; do
     assert_eq "$(cat "$SANDBOX/editor.log")" "$ID/shell/aliases.sh" "vim receives source path"
 done
 
+# Output is captured to keep the fixture quiet; exit status and editor file are asserted.
+# shellcheck disable=SC2034
 quoted_out="$(run_config env MESH_CONFIG_EDITOR="'$SANDBOX/bin/vim' -f" \
     MESH_CONFIG_TEST_EDITOR_LOG="$SANDBOX/editor.log" \
     bash "$RUNNER" shell/aliases.sh 2>&1)"
@@ -92,6 +94,8 @@ assert_eq "$?" "0" "quoted editor with arguments succeeds"
 assert_eq "$(cat "$SANDBOX/editor.log")" "-f $ID/shell/aliases.sh" "editor arguments preserved"
 
 rm -f "$SANDBOX/editor.log"
+# Output is captured to keep the fixture quiet; exit status and editor file are asserted.
+# shellcheck disable=SC2034
 default_out="$(run_config env -u MESH_CONFIG_EDITOR -u VISUAL -u EDITOR \
     PATH="$SANDBOX/bin:$PATH" MESH_CONFIG_TEST_EDITOR_LOG="$SANDBOX/editor.log" \
     bash "$RUNNER" shell/aliases.sh 2>&1)"
@@ -100,8 +104,12 @@ assert_eq "$(cat "$SANDBOX/editor.log")" "$ID/shell/aliases.sh" "default invokes
 
 mkdir -p "$HOME_FAKE/editor space"
 cp "$SANDBOX/bin/vim" "$HOME_FAKE/editor space/vim"
+# Intentionally pass a literal tilde to the editor parser under test.
+# shellcheck disable=SC2088
 for editor_spec in "~/editor\ space/vim -f" "'$HOME_FAKE/editor space/vim' -f"; do
     rm -f "$SANDBOX/editor.log"
+    # Output is captured; the command status and editor arguments are asserted.
+    # shellcheck disable=SC2034
     path_out="$(run_config env MESH_CONFIG_EDITOR="$editor_spec" \
         MESH_CONFIG_TEST_EDITOR_LOG="$SANDBOX/editor.log" \
         bash "$RUNNER" shell/aliases.sh 2>&1)"
@@ -114,6 +122,8 @@ done
 cp "$ID/deploy.map" "$SANDBOX/map-before"
 printf 'shell/aliases.sh.backup | ~/.aliases-backup\n' >> "$ID/deploy.map"
 printf '# backup\n' > "$ID/shell/aliases.sh.backup"
+# Output is captured to keep the fixture quiet; exit status and editor file are asserted.
+# shellcheck disable=SC2034
 exact_out="$(run_config env MESH_CONFIG_EDITOR="$SANDBOX/bin/vim" \
     MESH_CONFIG_TEST_EDITOR_LOG="$SANDBOX/editor.log" \
     bash "$RUNNER" shell/aliases.sh 2>&1)"

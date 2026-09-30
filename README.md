@@ -48,14 +48,14 @@ Then open **Ubuntu** from the Start menu and create your Linux user. Host script
 does **not** install the Nerd Font; that happens inside Ubuntu during setup
 (`shell-terminal/fonts` → CaskaydiaCove + Catppuccin in Windows Terminal).
 
-### B. Inside Ubuntu (or native Linux / macOS)
+### B. Linux / WSL, or macOS
 
-**Phase 0** — only what is needed to clone this repo:
+**Phase 0** — only what is needed to clone this repo. Homebrew is installed later, by `foundation`, inside `setup.sh`.
 
 | Platform | One-time prereq |
 |---|---|
 | WSL2 / native Linux | `sudo apt-get update && sudo apt-get install -y git curl ca-certificates` |
-| macOS | Nothing — Xcode CLT installs on demand the first time `setup.sh` calls `git` |
+| macOS | Command Line Tools, which provide `git`. The first `git` command opens Apple's installer when they are missing. |
 
 ```bash
 git clone https://github.com/henryavila/mesh-workstation ~/mesh-workstation
@@ -63,18 +63,46 @@ cd ~/mesh-workstation
 bash setup.sh
 ```
 
+The checkout can live on another volume. `cd` there and run `bash setup.sh` from that directory. `~/.local/bin` is added to `PATH` by the shell topic, so the first run is `bash setup.sh`.
+
 **What happens**
 
-1. **First run (no Node on PATH):** lean bootstrap — `foundation`, `git/config`,
-   `shell-terminal` (incl. fonts), `languages/node`, `personal`. Does **not**
-   silently install the full default-on fleet. Identity can still prompt on a TTY.
-2. **Open a new shell** (so fnm PATH fragments load).
-3. **Second run:** `bash setup.sh` opens the **Blink** menu — pick bundles
-   (`web/valet`, `databases/mysql`, `ai/claude-code`, …), confirm, apply.
+1. On a Mac with no Homebrew, a TTY asks whether to install it on a separate path. **Yes:** it asks for the path (Enter accepts `/Volumes/External/homebrew` when that volume is mounted) and exports `BREW_CUSTOM_PREFIX`. **No:** it exports `BREW_CUSTOM_PREFIX=/opt/homebrew`. Foundation installs Homebrew at that prefix later in the same run. `gh` is still missing at this point, so a warning about anonymous GitHub API access is expected; the `identity` topic installs `gh` after Homebrew and opens the browser to log in.
+2. One `sudo` password prompt (`sudo -v`) runs before the menu. Later `sudo` calls stay quiet for the cache window (~5–15 min).
+3. **No Node on PATH:** lean bootstrap — `foundation`, `identity`, `git/config`, `shell-terminal` (incl. fonts), `languages/node`, `personal`. The full default-on fleet (databases, web, AI, …) stays uninstalled until you pick it.
+4. **Node already on PATH:** the Blink menu opens on this first run.
+5. **Open a new shell** so the fnm and Homebrew `PATH` fragments load.
+6. **Next run:** `bash setup.sh` opens the Blink menu — pick bundles (`web/valet`, `databases/mysql`, `ai/claude-code`, …), confirm, apply.
+
+A mesh workstation keeps `identity` and `personal` selected. The menu asks for `MESH_IDENTITY_REPO` (URL or `owner/name`) and for the dev root, `CODE_DIR` (default `~/code`). Point `CODE_DIR` at the directory that should hold repos — on an external disk, that disk's code directory (for example `/Volumes/External/code`).
 
 > Historical note: early releases used a `whiptail` checklist over numbered
 > `00-*` / `60-web-stack` topics. That UX is gone; do not treat numbered topic
 > ids or `INCLUDE_*=1` as the current product path.
+
+#### Homebrew prefix (macOS)
+
+On a TTY, `setup.sh` asks before the menu and exports `BREW_CUSTOM_PREFIX`. Foundation reads that variable when it installs. Set the variable yourself to skip the question — a non-interactive run needs that, because it never asks.
+
+| Situation | Prefix |
+|---|---|
+| Interactive, nothing set, no `brew` yet | Asks "separate path?". Yes → asks for the path and exports it. No, or a blank/relative answer → exports `/opt/homebrew`. |
+| `BREW_CUSTOM_PREFIX` already set, no `brew` yet | That path. The question is skipped. |
+| Non-interactive, variable unset, no `brew` yet | `/opt/homebrew`. |
+| A `brew` binary already exists | That install. Later runs keep it. |
+
+Separate path without answering the question — the prefix `scripts/lib/detect-brew.sh` finds again even when `brew` is not on `PATH`:
+
+```bash
+cd /path/to/mesh-workstation
+BREW_CUSTOM_PREFIX=/Volumes/External/homebrew bash setup.sh
+```
+
+The last path component has to be `homebrew`, on a volume mounted at `/Volumes/External` (or `/Volumes/External 1`, `/Volumes/External 2`, … when macOS disambiguates the mount). The detector also looks at `/opt/homebrew` and `/usr/local`. A prefix on a volume whose name does not start with `External` stays invisible until `brew` is already on `PATH`; the next run then tries to reinstall and stops because the directory is not empty.
+
+The upstream Homebrew install script always writes `/opt/homebrew` (Apple Silicon) or `/usr/local` (Intel). A binary in either place is the prefix every later run keeps, so the external path has to be chosen on this first run.
+
+A custom prefix builds most formulae from source, because bottles are not relocatable. The first full workstation install takes longer than `/opt/homebrew`. On a volume mounted with owners disabled, user LaunchAgents (Redis, Mailpit, Postgres, Syncthing) start through the rootfs launch-wrapper when those topics run. The question printed before the menu lists both.
 
 **Guest / server mode (`--no-mesh`)** — install tools without joining the mesh:
 
@@ -124,7 +152,11 @@ bash setup.sh --non-interactive --bundle languages/php --bundle databases/mysql
 
 The menu is automatically skipped when any of these is true: (a) `NON_INTERACTIVE=1` or `--non-interactive`; (b) stdin/stdout isn't a TTY (pipe, cron, CI); (c) one or more `--bundle` flags were passed.
 
-Right after the menu (or immediately, when skipped), the bootstrap runs `sudo -v` to warm up the sudo cache — one password prompt, then subsequent `sudo` calls within the cache window (~5–15min) are silent.
+On macOS, put `BREW_CUSTOM_PREFIX` on the same command. A non-interactive run with the variable unset installs Homebrew at `/opt/homebrew`:
+
+```bash
+BREW_CUSTOM_PREFIX=/Volumes/External/homebrew bash setup.sh --non-interactive
+```
 
 ### After the bootstrap finishes
 
@@ -203,7 +235,8 @@ Primarily for automation / CI — the interactive menu fills these in for human 
 | `INCLUDE_IDENTITY=1` | enable `95-dotfiles-personal`; `MESH_IDENTITY_REPO=<url>` alone is still accepted as a legacy shorthand |
 | `MESH_AI_PACKAGES=1` | legacy alias for `INCLUDE_AI_TOOLS=1` |
 | `GIT_NAME` / `GIT_EMAIL` | identity — applied only when `user.name` / `user.email` aren't set yet (topic 50-git preserves existing values) |
-| `CODE_DIR` | dev root — where your repos live (default `~/code`); shell auto-cd + web-stack site root |
+| `CODE_DIR` | dev root — where your repos live (default `~/code`; the menu asks on first run). Shell auto-cd + web-stack site root. On an external disk, set the disk's code directory (for example `/Volumes/External/code`) |
+| `BREW_CUSTOM_PREFIX` | macOS, only when no `brew` binary exists yet. Absolute prefix, for example `/Volumes/External/homebrew`. The directory must be named `homebrew` directly under `/Volumes/External` (or `/Volumes/External 1`, …) so the next run can find it with an empty `PATH`. On a TTY, `setup.sh` asks and exports this itself. Set it to skip that question. Non-interactive runs with it unset use `/opt/homebrew`. An existing `brew` binary wins over this variable |
 | `INCLUDE_WEBSTACK` / `INCLUDE_REMOTE` / `INCLUDE_AI_TOOLS` / `INCLUDE_EDITOR` / `INCLUDE_DOCKER` | enable opt-in topics |
 | `INCLUDE_MAILPIT=1` / `INCLUDE_NGROK=1` / `INCLUDE_MSSQL=1` / `INCLUDE_POSTGRES=1` | 60-web-stack extras (when `INCLUDE_WEBSTACK=1`) |
 | `POSTGRES_VERSION=17` | PostgreSQL major version when `INCLUDE_POSTGRES=1` (default 17; menu prompts on first run, env var pre-seeds for automation) |

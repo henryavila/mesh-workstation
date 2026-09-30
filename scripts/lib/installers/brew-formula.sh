@@ -6,7 +6,24 @@
 # plain `brew list` can reach the Homebrew API and exit non-zero when DNS is down
 # (verify/operational audit 2026-06-03, Codex finding #4) even though the local
 # Cellar is present. The guards force a purely local, offline-safe query.
-_brew_formula_bin() { printf '%s' "${BREW_BIN:-brew}"; }
+_brew_formula_bin() {
+    if [[ -n "${BREW_BIN:-}" && -x "${BREW_BIN:-}" ]]; then
+        printf '%s' "$BREW_BIN"
+    elif command -v brew >/dev/null 2>&1; then
+        printf 'brew'
+    else
+        local cand
+        cand="$(bash "${MESH_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/detect-brew.sh" 2>/dev/null || true)"
+        if [[ -n "$cand" ]]; then
+            eval "$cand"
+            export BREW_BIN BREW_PREFIX
+            [[ -n "${BREW_PREFIX:-}" && ":$PATH:" != *":$BREW_PREFIX/bin:"* ]] && PATH="$BREW_PREFIX/bin:$PATH"
+            printf '%s' "${BREW_BIN:-brew}"
+        else
+            printf 'brew'
+        fi
+    fi
+}
 
 brew_formula_check() {
     HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_FROM_API=1 \

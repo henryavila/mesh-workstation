@@ -100,6 +100,10 @@ export MESH_LIB_DIR="$ENGINE_DIR"
 . "$ENGINE_DIR/log.sh"
 # shellcheck disable=SC1091
 . "$ENGINE_DIR/env.sh"
+if [[ -z "${MESH_WORKSTATION_DIR:-}" || ! -d "${MESH_WORKSTATION_DIR}" ]]; then
+    MESH_WORKSTATION_DIR="$(cd "$ENGINE_DIR/../.." && pwd)"
+    export MESH_WORKSTATION_DIR
+fi
 # shellcheck disable=SC1091
 . "$ENGINE_DIR/install-state.sh"
 # shellcheck disable=SC1091
@@ -192,32 +196,29 @@ export MESH_OS="$PLATFORM"
 
 # On macOS, many custom item scripts reference $BREW_PREFIX/$BREW_BIN as bare
 # env vars (v1 setup.sh exported them globally; the v2 engine must too, mirroring
-# MESH_LIB_DIR). Detect Homebrew once and export so every item subshell inherits
-# them. Tolerant: if brew isn't on disk yet (e.g. a fresh machine before
-# foundation/base installs it) we leave them unset — foundation/mac/core.sh
-# self-resolves via detect-brew.sh, and later bundles re-run the engine with brew
-# present. Items that need brew but run before it exists fail loudly under set -u,
-# which is correct (topo order puts foundation first anyway).
-if [[ "$PLATFORM" == "mac" ]]; then
-    __brew_out="$(bash "$ENGINE_DIR/detect-brew.sh" 2>/dev/null || true)"
-    if [[ -n "$__brew_out" ]]; then
-        eval "$__brew_out"
-        export BREW_BIN BREW_PREFIX
-        # Put Homebrew's bin/sbin on PATH for EVERY item subshell so the package
-        # drivers (brew_formula_check runs `brew list`, …) AND custom scripts can
-        # resolve brew-installed tools (brew, fnm, node, cargo…) by BARE name,
-        # consistently — independent of how setup.sh was invoked or whether the
-        # prefix is standard (/opt/homebrew, /usr/local) or custom (e.g.
-        # /Volumes/External/homebrew). Without this a bare `fnm`/`brew` lookup
-        # fails whenever the invoking shell's PATH lacks the prefix, and a custom
-        # verify() then reports rc=67 although the tool is in fact installed.
-        # Idempotent (skip when already on PATH).
-        if [[ -n "${BREW_PREFIX:-}" && ":$PATH:" != *":$BREW_PREFIX/bin:"* ]]; then
-            PATH="$BREW_PREFIX/bin:$BREW_PREFIX/sbin:$PATH"; export PATH
+# MESH_LIB_DIR). Put Homebrew's bin/sbin on PATH for EVERY item subshell so the
+# package drivers (brew_formula_check runs `brew list`, …) AND custom scripts can
+# resolve brew-installed tools (brew, fnm, node, cargo…) by BARE name.
+#
+# When brew is missing at engine start (e.g. fresh machine before foundation/base
+# installs it), foundation/base installs it mid-run. This function is called at
+# startup AND re-checked before each item in the execution loop so subsequent items
+# immediately inherit the newly installed Homebrew in PATH and environment.
+_refresh_brew_env_if_mac() {
+    [[ "$PLATFORM" == "mac" ]] || return 0
+    if [[ -z "${BREW_BIN:-}" || ! -x "${BREW_BIN:-}" || ":$PATH:" != *":${BREW_PREFIX:-/opt/homebrew}/bin:"* ]]; then
+        local __brew_out
+        __brew_out="$(bash "$ENGINE_DIR/detect-brew.sh" 2>/dev/null || true)"
+        if [[ -n "$__brew_out" ]]; then
+            eval "$__brew_out"
+            export BREW_BIN BREW_PREFIX
+            if [[ -n "${BREW_PREFIX:-}" && ":$PATH:" != *":$BREW_PREFIX/bin:"* ]]; then
+                PATH="$BREW_PREFIX/bin:$BREW_PREFIX/sbin:$PATH"; export PATH
+            fi
         fi
     fi
-    unset __brew_out
-fi
+}
+_refresh_brew_env_if_mac
 
 # Standard user bin: many non-brew installers (rtk, moshi-hook, github-release
 # binaries, the WSL rust bins, pip --user) drop executables in ~/.local/bin.
@@ -756,6 +757,9 @@ apply_bundle() {
             bundle_processed=$((bundle_processed+1))
             continue
         fi
+
+        # Refresh Homebrew environment if it was installed mid-run (e.g. by foundation/base)
+        _refresh_brew_env_if_mac
 
         (   # per-item subshell isolation
             local driver="$INSTALLERS_DIR/${type}.sh"

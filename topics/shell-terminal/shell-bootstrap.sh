@@ -50,7 +50,11 @@ _resolve_gitignore_target() {
 _load_managed_block() {
     local ws_lib here
     here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    ws_lib="${MESH_WORKSTATION_DIR:-$(cd "$here/../.." && pwd)}/scripts/lib"
+    if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "${MESH_WORKSTATION_DIR}/scripts/lib" ]]; then
+        ws_lib="${MESH_WORKSTATION_DIR}/scripts/lib"
+    else
+        ws_lib="$(cd "$here/../.." && pwd)/scripts/lib"
+    fi
     if ! declare -f managed_block_apply >/dev/null 2>&1; then
         # shellcheck disable=SC1091
         . "$ws_lib/managed-block.sh"

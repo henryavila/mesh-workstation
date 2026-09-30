@@ -13,7 +13,11 @@
 # install, not a gate. The syncthing-service item already verified the daemon.
 # Marked `idempotent: true` in the manifest so it runs on every apply.
 
-_WS="${MESH_WORKSTATION_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "${MESH_WORKSTATION_DIR}/scripts/lib" ]]; then
+    _WS="${MESH_WORKSTATION_DIR}"
+else
+    _WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
 _RUNNER="$_WS/scripts/runners/syncthing.sh"
 
 _data_file() {

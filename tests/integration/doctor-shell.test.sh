@@ -57,7 +57,9 @@ assert_contains "$out" "mesh reinstall shell" "doctor recovery is mesh reinstall
 assert_not_contains "$out" "mesh doctor --fix" "shell recovery is not doctor --fix"
 
 echo "── json counts marker_miss ──"
-json="$(run_doctor --json 2>&1)"
+json_rc=0
+json="$(run_doctor --json 2>&1)" || json_rc=$?
+assert_eq "$json_rc" "1" "JSON mode preserves the unhealthy doctor exit code"
 assert_contains "$json" '"marker_miss":1' "json reports marker_miss 1"
 
 echo "── mesh-managed zshrc is healthy ──"

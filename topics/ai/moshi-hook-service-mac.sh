@@ -7,11 +7,14 @@
 #
 # Also handles first-time pairing + agent hook installation.
 
-# Source log.sh defensively so info()/followup() resolve even when this script
-# is sourced/run outside the engine (which pre-loads log.sh at top level).
-# Mirrors moshi-hook-service-wsl.sh / install-moshi-hook.sh. log.sh is
-# source-only (no side effects beyond defining functions), so re-sourcing is safe.
-_MOSHI_WS_DIR="${MESH_WORKSTATION_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+_moshi_resolve_ws_dir() {
+    if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "${MESH_WORKSTATION_DIR}/scripts/lib" ]]; then
+        printf '%s' "${MESH_WORKSTATION_DIR}"
+    else
+        printf '%s' "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    fi
+}
+_MOSHI_WS_DIR="$(_moshi_resolve_ws_dir)"
 # shellcheck disable=SC1091
 . "$_MOSHI_WS_DIR/scripts/lib/log.sh"
 
@@ -59,7 +62,8 @@ check() {
 }
 
 install() {
-    local ws_dir="${MESH_WORKSTATION_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+    local ws_dir
+    ws_dir="$(_moshi_resolve_ws_dir)" || return 1
 
     # Teardown conflicting homebrew plists (both system + user scope)
     # before installing our wrapper — prevents dual-plist exit 78 loop.
@@ -116,7 +120,8 @@ verify() {
 repair() { install; }
 
 rollback() {
-    local ws_dir="${MESH_WORKSTATION_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+    local ws_dir
+    ws_dir="$(_moshi_resolve_ws_dir)" || return 1
     # shellcheck disable=SC1091
     . "$ws_dir/scripts/lib/launch-wrapper.sh"
     if _use_wrapper; then
@@ -165,7 +170,8 @@ uninstall() {
     # errexit is OFF in custom verbs and `set +e` is L03-banned, so every step
     # is best-effort via `|| true` / captured rc; success is gated on the
     # service being gone (! _is_running), mirroring ngrok's honest marker drop.
-    local ws_dir="${MESH_WORKSTATION_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+    local ws_dir
+    ws_dir="$(_moshi_resolve_ws_dir)" || return 1
     # shellcheck disable=SC1091
     . "$ws_dir/scripts/lib/launch-wrapper.sh"
 

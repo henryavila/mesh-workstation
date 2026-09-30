@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
+_lazygit_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "${MESH_WORKSTATION_DIR}/scripts/lib" ]]; then
+    _lazygit_ws="${MESH_WORKSTATION_DIR}"
+else
+    _lazygit_ws="$(cd "$_lazygit_here/../../.." && pwd)"
+fi
 # shellcheck source=/dev/null
-. "${MESH_WORKSTATION_DIR:-$HOME/mesh-workstation}/scripts/lib/github-api.sh"
+. "$_lazygit_ws/scripts/lib/github-api.sh"
 check() { command -v lazygit >/dev/null 2>&1; }
 
 install() {

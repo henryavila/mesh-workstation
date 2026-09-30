@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
+_mailpit_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "${MESH_WORKSTATION_DIR}/scripts/lib" ]]; then
+    _mailpit_ws="${MESH_WORKSTATION_DIR}"
+else
+    _mailpit_ws="$(cd "$_mailpit_here/../../.." && pwd)"
+fi
 # shellcheck source=/dev/null
-. "${MESH_WORKSTATION_DIR:-$HOME/mesh-workstation}/scripts/lib/github-api.sh"
+. "$_mailpit_ws/scripts/lib/github-api.sh"
 # install-mailpit.sh — local mail catcher for dev.
 # Gated by INCLUDE_MAILPIT=1 (set via menu or env).
 #

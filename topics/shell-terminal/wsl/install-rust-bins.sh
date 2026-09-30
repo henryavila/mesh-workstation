@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
+_rust_bins_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -n "${MESH_WORKSTATION_DIR:-}" && -d "${MESH_WORKSTATION_DIR}/scripts/lib" ]]; then
+    _rust_bins_ws="${MESH_WORKSTATION_DIR}"
+else
+    _rust_bins_ws="$(cd "$_rust_bins_here/../../.." && pwd)"
+fi
 # shellcheck source=/dev/null
-. "${MESH_WORKSTATION_DIR:-$HOME/mesh-workstation}/scripts/lib/github-api.sh"
+. "$_rust_bins_ws/scripts/lib/github-api.sh"
 # dust + xh + procs — single-file Rust binaries not in apt 24.04.
 # Installed to ~/.local/bin via GitHub release tarballs. Idempotent.
 #

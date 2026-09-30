@@ -17,15 +17,26 @@ _npm_is_native() {
 _npm_global_ensure_on_path() {
     local npm_bin
     npm_bin="$(command -v npm 2>/dev/null || true)"
-    _npm_is_native "$npm_bin" && return 0
-    if ! command -v fnm >/dev/null 2>&1 && [[ -x "$HOME/.local/share/fnm/fnm" ]]; then
-        PATH="$HOME/.local/share/fnm:$PATH"; export PATH
+    if ! _npm_is_native "$npm_bin"; then
+        if ! command -v fnm >/dev/null 2>&1 && [[ -x "$HOME/.local/share/fnm/fnm" ]]; then
+            PATH="$HOME/.local/share/fnm:$PATH"; export PATH
+        fi
+        if command -v fnm >/dev/null 2>&1; then
+            eval "$(fnm env 2>/dev/null || true)"
+            fnm use default >/dev/null 2>&1 || true
+        fi
+        npm_bin="$(command -v npm 2>/dev/null || true)"
     fi
-    if command -v fnm >/dev/null 2>&1; then
-        eval "$(fnm env 2>/dev/null || true)"
-        fnm use default >/dev/null 2>&1 || true
+    if command -v npm >/dev/null 2>&1; then
+        local pfx
+        pfx="$(npm config get prefix 2>/dev/null || true)"
+        if [[ -n "$pfx" && -d "$pfx/bin" ]]; then
+            case ":$PATH:" in
+                *":$pfx/bin:"*) ;;
+                *) export PATH="$pfx/bin:$PATH" ;;
+            esac
+        fi
     fi
-    npm_bin="$(command -v npm 2>/dev/null || true)"
     _npm_is_native "$npm_bin"
 }
 
@@ -38,8 +49,34 @@ npm_global_check()   {
     [[ -n "$out" ]]
 }
 npm_global_verify() { npm_global_check "$1"; }
-npm_global_install() { _npm_global_ensure_on_path || true; npm install -g "$1"; }
-npm_global_repair() { _npm_global_ensure_on_path || true; npm install -g --force "$1"; }
+npm_global_install() {
+    _npm_global_ensure_on_path || true
+    npm install -g "$1"
+    local pfx
+    pfx="$(npm config get prefix 2>/dev/null || true)"
+    if [[ -n "$pfx" && -d "$pfx/bin" ]]; then
+        mkdir -p "$HOME/.local/bin"
+        for b in "$pfx/bin"/*; do
+            if [[ -x "$b" ]] && [[ ! -e "$HOME/.local/bin/$(basename "$b")" ]]; then
+                ln -sf "$b" "$HOME/.local/bin/$(basename "$b")" 2>/dev/null || true
+            fi
+        done
+    fi
+}
+npm_global_repair() {
+    _npm_global_ensure_on_path || true
+    npm install -g --force "$1"
+    local pfx
+    pfx="$(npm config get prefix 2>/dev/null || true)"
+    if [[ -n "$pfx" && -d "$pfx/bin" ]]; then
+        mkdir -p "$HOME/.local/bin"
+        for b in "$pfx/bin"/*; do
+            if [[ -x "$b" ]] && [[ ! -e "$HOME/.local/bin/$(basename "$b")" ]]; then
+                ln -sf "$b" "$HOME/.local/bin/$(basename "$b")" 2>/dev/null || true
+            fi
+        done
+    fi
+}
 # Version-aware update (T-600): `npm outdated -g <pkg>` exits 0 when the package
 # is current, non-zero when a newer version exists — only reinstall if stale.
 npm_global_update() {
