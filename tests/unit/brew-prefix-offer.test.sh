@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Fixture variables are consumed by sourced production functions.
+# shellcheck disable=SC2034
 # setup.sh asks for a separate Homebrew path and exports BREW_CUSTOM_PREFIX
 # before the engine is piped through tee (foundation's own prompt has no TTY).
 set -uo pipefail

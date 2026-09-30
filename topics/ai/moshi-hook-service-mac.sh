@@ -62,7 +62,8 @@ check() {
 }
 
 install() {
-    local ws_dir="$(_moshi_resolve_ws_dir)"
+    local ws_dir
+    ws_dir="$(_moshi_resolve_ws_dir)" || return 1
 
     # Teardown conflicting homebrew plists (both system + user scope)
     # before installing our wrapper — prevents dual-plist exit 78 loop.
@@ -119,7 +120,8 @@ verify() {
 repair() { install; }
 
 rollback() {
-    local ws_dir="$(_moshi_resolve_ws_dir)"
+    local ws_dir
+    ws_dir="$(_moshi_resolve_ws_dir)" || return 1
     # shellcheck disable=SC1091
     . "$ws_dir/scripts/lib/launch-wrapper.sh"
     if _use_wrapper; then
@@ -168,7 +170,8 @@ uninstall() {
     # errexit is OFF in custom verbs and `set +e` is L03-banned, so every step
     # is best-effort via `|| true` / captured rc; success is gated on the
     # service being gone (! _is_running), mirroring ngrok's honest marker drop.
-    local ws_dir="$(_moshi_resolve_ws_dir)"
+    local ws_dir
+    ws_dir="$(_moshi_resolve_ws_dir)" || return 1
     # shellcheck disable=SC1091
     . "$ws_dir/scripts/lib/launch-wrapper.sh"
 

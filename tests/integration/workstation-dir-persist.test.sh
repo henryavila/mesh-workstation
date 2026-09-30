@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Fixture variables are consumed by sourced production functions.
+# shellcheck disable=SC2034
 # tests/integration/workstation-dir-persist.test.sh
 #
 # Regression suite for setup.sh's persist_workstation_dir() — ensures
