@@ -196,6 +196,7 @@ else
     _tuios_publish_password "$password_file" || _tuios_publish_fail 'cannot create protected origin password'
 fi
 tuios_service_apply_remote "$hostname" "$remote_port" "$mode" || exit 1
+tuios_service_apply_local || exit 1
 _tuios_publish_config "$config" "$tunnel_id" "$hostname" "$remote_port" "$credentials" || exit 1
 tuios_service_apply_tunnel "$alias_name" "$config" "$tunnel_id" || exit 1
 

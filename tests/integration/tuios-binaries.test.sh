@@ -50,7 +50,7 @@ export TUIOS_TEST_OS=Linux TUIOS_TEST_ARCH=x86_64 TUIOS_VERSION=v1.2.3
 # shellcheck source=/dev/null
 source "$INSTALLER"
 
-if rg -q '\$\{[^}]*,,' "$INSTALLER"; then
+if grep -Eq '\$\{[^}]*,,' "$INSTALLER"; then
     fail "installer avoids Bash 4 case conversion (macOS Bash 3.2)"
 else
     pass "installer avoids Bash 4 case conversion (macOS Bash 3.2)"

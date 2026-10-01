@@ -54,6 +54,11 @@ out="$(bash "$ROOT/bin/mesh" tuios status 2>&1)"
 rc=$?
 assert_eq "$rc" 0 "Mesh host alias selects profile"
 assert_not_contains "$out" 'apiToken' "status prints no credential field"
+unset MESH_HOST_ALIAS
+out="$(bash "$ROOT/bin/mesh" tuios status 2>&1)"
+rc=$?
+assert_ne "$rc" 0 "another machine does not inherit the sole profile host"
+export MESH_HOST_ALIAS=testbox
 
 cat > "$SANDBOX/setup-stub.sh" <<'SH'
 #!/bin/bash
@@ -85,20 +90,54 @@ exit 0
 SH
 cat > "$SANDBOX/fakebin/curl" <<'SH'
 #!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = '%{http_code}' ]; then printf '200'; exit 0; fi
+done
 if [ "${TUIOS_TEST_ACCESS_STATUS:-302}" = 302 ]; then
   printf 'HTTP/2 302\r\nlocation: https://team.cloudflareaccess.com/login\r\n\r\n'
 else
   printf 'HTTP/2 200\r\n\r\n'
 fi
 SH
-chmod +x "$SANDBOX/fakebin/systemctl" "$SANDBOX/fakebin/curl"
+cat > "$SANDBOX/fakebin/tuios" <<'SH'
+#!/bin/sh
+printf 'tuios version 0.8.4\n'
+SH
+cat > "$SANDBOX/fakebin/tuios-web" <<'SH'
+#!/bin/sh
+printf 'tuios-web version 0.8.4\n'
+SH
+cat > "$SANDBOX/fakebin/cloudflared" <<'SH'
+#!/bin/sh
+if [ "$1" = --version ]; then printf 'cloudflared version 2026.9.3\n'; exit 0; fi
+if [ "${TUIOS_TEST_EDGE:-connected}" = connected ]; then
+  printf '{"id":"00000000-1111-4222-8333-444444444444","conns":[{"conns":[{"is_pending_reconnect":false}]}]}\n'
+else
+  printf '{"id":"00000000-1111-4222-8333-444444444444","conns":[]}\n'
+fi
+SH
+chmod +x "$SANDBOX/fakebin/systemctl" "$SANDBOX/fakebin/curl" "$SANDBOX/fakebin/tuios" "$SANDBOX/fakebin/tuios-web" "$SANDBOX/fakebin/cloudflared"
 old_path="$PATH"
 export PATH="$SANDBOX/fakebin:$PATH"
+export TUIOS_BIN_DIR="$SANDBOX/fakebin" TUIOS_CLOUDFLARED_BIN_DIR="$SANDBOX/fakebin"
 export TUIOS_SERVICE_DRY_RUN=0 TUIOS_TEST_ACCESS_STATUS=302
+out="$(bash "$ROOT/bin/mesh" tuios status --host testbox 2>&1)"
+rc=$?
+assert_eq "$rc" 0 "status is readable when healthy"
+assert_contains "$out" 'versions: tuios=0.8.4 tuios-web=0.8.4 cloudflared=2026.9.3' "status reports installed versions"
+assert_contains "$out" 'tunnel: connected' "status reports edge connection"
+assert_contains "$out" 'Access: protected' "status reports the public gate"
 out="$(bash "$ROOT/bin/mesh" tuios doctor --host testbox 2>&1)"
 rc=$?
 assert_eq "$rc" 0 "doctor accepts active services with Access redirect"
 assert_contains "$out" 'Access: protected' "doctor reports public Access gate"
+export TUIOS_TEST_EDGE=disconnected
+out="$(bash "$ROOT/bin/mesh" tuios status --host testbox 2>&1)"
+assert_contains "$out" 'tunnel: disconnected' "status reports a disconnected tunnel"
+out="$(bash "$ROOT/bin/mesh" tuios doctor --host testbox 2>&1)"
+rc=$?
+assert_ne "$rc" 0 "doctor rejects a tunnel with no edge connector"
+export TUIOS_TEST_EDGE=connected
 export TUIOS_TEST_ACCESS_STATUS=200
 out="$(bash "$ROOT/bin/mesh" tuios doctor --host testbox 2>&1)"
 rc=$?

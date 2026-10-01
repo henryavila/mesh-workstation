@@ -82,6 +82,7 @@ plist="$TUIOS_LAUNCHD_DIR/com.mesh.tuios-web-local.plist"
 assert_file_exists "$plist" "local LaunchAgent exists"
 assert_file_contains "$plist" '<string>127\.0\.0\.1</string>' "LaunchAgent binds loopback"
 assert_file_contains "$plist" '<key>KeepAlive</key>' "LaunchAgent restarts automatically"
+assert_eq "$(sed -n '1p' "$plist")" '<?xml version="1.0" encoding="UTF-8"?>' "LaunchAgent begins with XML declaration"
 printf '<plist><dict><key>Label</key><string>com.mesh.tuios-web-local</string></dict></plist>\n' > "$plist"
 if check; then fail "Mac check rejects foreign plist"; else pass "Mac check rejects foreign plist"; fi
 rm -f "$plist"

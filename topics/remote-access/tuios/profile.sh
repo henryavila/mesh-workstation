@@ -44,9 +44,6 @@ tuios_profile_alias() {
         alias="$(jq -er --arg physical "$physical" '
           first(.hosts | to_entries[] | select(.value.system_hostname == $physical) | .key) // empty
         ' "$file" 2>/dev/null)" || alias=""
-        if [[ -z "$alias" ]]; then
-            alias="$(jq -er 'if (.hosts | length) == 1 then (.hosts | keys[0]) else empty end' "$file" 2>/dev/null)" || alias=""
-        fi
     fi
     if [[ -z "$alias" ]] || ! jq -e --arg alias "$alias" '.hosts[$alias] != null' "$file" >/dev/null 2>&1; then
         printf 'mesh tuios: no profile for this host; use --host ALIAS or run mesh tuios setup\n' >&2

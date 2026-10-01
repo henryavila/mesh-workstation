@@ -76,7 +76,7 @@ assert_file_contains "$TUIOS_SYSTEMD_DIR/tuios-web-remote.service" '.*--password
 ASSERT_MSG="password has owner-only mode" assert_true "test \"$(stat -c %a "$TUIOS_WEB_PASSWORD_FILE")\" = 600"
 assert_file_contains "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.yml" 'hostname: quiet-otter.example.com' "ingress uses only selected host"
 assert_file_contains "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.yml" 'service: http_status:404' "unmatched hosts get 404"
-assert_eq "$(rg -c 'tunnel route dns' "$TUIOS_TEST_LOG")" 1 "first setup adds one DNS route"
+assert_eq "$(grep -c 'tunnel route dns' "$TUIOS_TEST_LOG")" 1 "first setup adds one DNS route"
 
 chmod 0644 "$TUIOS_CLOUDFLARED_DIR/00000000-1111-4222-8333-444444444444.json"
 out="$(bash "$PUBLISH" --host testbox 2>&1)"
@@ -85,7 +85,7 @@ assert_ne "$rc" 0 "refuses a tunnel credential readable by other users"
 chmod 0400 "$TUIOS_CLOUDFLARED_DIR/00000000-1111-4222-8333-444444444444.json"
 
 out="$(bash "$PUBLISH" --host testbox 2>&1)"
-assert_eq "$(rg -c 'tunnel route dns' "$TUIOS_TEST_LOG")" 1 "repeat setup does not rewrite DNS"
+assert_eq "$(grep -c 'tunnel route dns' "$TUIOS_TEST_LOG")" 1 "repeat setup does not rewrite DNS"
 
 export TUIOS_TEST_ACCESS_STATUS=200
 out="$(bash "$PUBLISH" --host testbox --confirm-access-email user@example.com 2>&1)"
@@ -114,6 +114,7 @@ export TUIOS_WEB_PASSWORD_FILE="$SANDBOX/new-password"
 export MESH_TUIOS_SETUP_ALIAS=newbox
 export MESH_TUIOS_SETUP_HOSTNAME=leaf-river.example.com
 export MESH_TUIOS_SETUP_EMAIL=new@example.com
+export TUIOS_SESSION=mobile-work TUIOS_LOCAL_PORT=7691
 mkdir -p "$TUIOS_CLOUDFLARED_DIR"
 printf 'test certificate\n' > "$TUIOS_CLOUDFLARED_DIR/cert.pem"
 out="$(bash "$PUBLISH" 2>&1)"
@@ -121,6 +122,8 @@ rc=$?
 assert_eq "$rc" 0 "new identity can create its first host profile and tunnel"
 assert_eq "$(jq -r '.hosts.newbox.public_hostname' "$MESH_TUIOS_PROFILE" 2>/dev/null)" 'leaf-river.example.com' "new user's codename is recorded privately"
 assert_eq "$(jq -r '.hosts.newbox.tunnel_id' "$MESH_TUIOS_PROFILE" 2>/dev/null)" 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' "profile receives tunnel ID without credential"
+assert_file_contains "$TUIOS_SYSTEMD_DIR/tuios-web-local.service" '.*--port 7691 --default-session mobile-work' "local web follows the private profile"
+assert_file_contains "$TUIOS_SYSTEMD_DIR/tuios-web-remote.service" '.*--default-session mobile-work' "remote web shares the customized local session"
 ASSERT_MSG="private profile contains no account or tunnel credential" assert_false "grep -qE 'apiToken|TunnelSecret|cert.pem' '$MESH_TUIOS_PROFILE'"
 
 out="$(bash "$PUBLISH" --host newbox --disable 2>&1)"

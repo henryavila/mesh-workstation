@@ -65,24 +65,73 @@ remote_port="$(tuios_profile_get "$alias_name" remote_port)" || exit 1
 printf 'host: %s\nurl: https://%s\nsession: %s\nlocal port: %s\nremote port: %s\n' \
     "$alias_name" "$hostname" "$session" "$local_port" "$remote_port"
 
-[[ "$verb" == status ]] && exit 0
-
-# Doctor is read-only; the publish helper adds deeper tunnel checks later.
 if [[ "${TUIOS_SERVICE_DRY_RUN:-0}" == 1 ]]; then exit 0; fi
-case "${TUIOS_TEST_OS:-$(uname -s)}" in
-    Linux)
-        systemctl --user is-active tuios-web-local.service >/dev/null 2>&1 || die 'local TUIOS web service is not active'
-        systemctl --user is-active tuios-web-remote.service >/dev/null 2>&1 || die 'remote TUIOS web service is not active'
-        if ! systemctl --user is-active "tuios-tunnel-$alias_name.service" >/dev/null 2>&1; then
-            systemctl --user is-active "cloudflared-tuios-$alias_name.service" >/dev/null 2>&1 || die 'Cloudflare tunnel service is not active'
-        fi
-        ;;
-    Darwin)
-        launch_agent_running tuios-web-local || die 'local TUIOS web LaunchAgent is not running'
-        launch_agent_running tuios-web-remote || die 'remote TUIOS web LaunchAgent is not running'
-        launch_agent_running "tuios-tunnel-$alias_name" || die 'Cloudflare tunnel LaunchAgent is not running'
-        ;;
-esac
-printf 'services: active\n'
-tuios_access_redirect_ok "$hostname" || die 'Access redirect missing; remote origin may be exposed — run mesh tuios setup'
-printf 'Access: protected\n'
+
+tuios_cli="${TUIOS_BIN_DIR:-$HOME/.local/bin}/tuios"
+tuios_web="${TUIOS_BIN_DIR:-$HOME/.local/bin}/tuios-web"
+cloudflared="${TUIOS_CLOUDFLARED_BIN_DIR:-$HOME/.local/bin}/cloudflared"
+cli_version="$("$tuios_cli" --version 2>/dev/null | awk '$2 == "version" {print $3; exit}')"
+web_version="$("$tuios_web" --version 2>/dev/null | awk '$2 == "version" {print $3; exit}')"
+cloudflared_version="$("$cloudflared" --version 2>/dev/null | awk '$2 == "version" {print $3; exit}')"
+printf 'versions: tuios=%s tuios-web=%s cloudflared=%s\n' \
+    "${cli_version:-missing}" "${web_version:-missing}" "${cloudflared_version:-missing}"
+healthy=1
+if [[ -z "$cli_version" || "$cli_version" != "$web_version" || -z "$cloudflared_version" ]]; then healthy=0; fi
+
+service_running() {
+    local name="$1"
+    case "${TUIOS_TEST_OS:-$(uname -s)}" in
+        Linux) systemctl --user is-active "$name.service" >/dev/null 2>&1 ;;
+        Darwin) launch_agent_running "$name" ;;
+        *) return 1 ;;
+    esac
+}
+
+for name in tuios-web-local tuios-web-remote; do
+    if service_running "$name"; then
+        printf '%s: active\n' "$name"
+    else
+        printf '%s: inactive\n' "$name"
+        healthy=0
+    fi
+done
+if service_running "tuios-tunnel-$alias_name" ||
+    { [[ "${TUIOS_TEST_OS:-$(uname -s)}" == Linux ]] && service_running "cloudflared-tuios-$alias_name"; }; then
+    printf 'tunnel service: active\n'
+else
+    printf 'tunnel service: inactive\n'
+    healthy=0
+fi
+
+local_http="$(curl -sS --noproxy '*' -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 6 "http://127.0.0.1:$local_port/" 2>/dev/null)" || local_http=""
+remote_http="$(curl -sS --noproxy '*' -H "Host: $hostname" -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 6 "http://127.0.0.1:$remote_port/" 2>/dev/null)" || remote_http=""
+if [[ "$local_http" == 200 && ( "$remote_http" == 200 || "$remote_http" == 401 ) ]]; then
+    printf 'origins: reachable\n'
+else
+    printf 'origins: unhealthy (local=%s remote=%s)\n' "${local_http:-?}" "${remote_http:-?}"
+    healthy=0
+fi
+
+tunnel_id="$(tuios_profile_get "$alias_name" tunnel_id 2>/dev/null || true)"
+tunnel_json=""
+if [[ -n "$tunnel_id" && -x "$cloudflared" ]]; then
+    tunnel_json="$("$cloudflared" tunnel info --output json "$tunnel_id" 2>/dev/null)" || tunnel_json=""
+fi
+if [[ -n "$tunnel_json" ]] && jq -e --arg id "$tunnel_id" \
+    '.id == $id and any(.conns[]?; any(.conns[]?; .is_pending_reconnect == false))' \
+    <<< "$tunnel_json" >/dev/null 2>&1; then
+    printf 'tunnel: connected\n'
+else
+    printf 'tunnel: disconnected\n'
+    healthy=0
+fi
+
+if tuios_access_redirect_ok "$hostname"; then
+    printf 'Access: protected\n'
+else
+    printf 'Access: redirect missing\n'
+    healthy=0
+fi
+if [[ "$verb" == doctor && "$healthy" -ne 1 ]]; then
+    die "health check failed; run bash setup.sh --bundle remote-access/tuios --bundle remote-access/tuios-cloudflare, then mesh tuios setup --host $alias_name"
+fi

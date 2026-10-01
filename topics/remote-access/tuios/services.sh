@@ -86,8 +86,8 @@ _tuios_service_render_systemd() {
 _tuios_service_render_launchd() {
     local name="$1" bin="$2" label="com.mesh.$1" arg
     shift 2
-    printf '<!-- Managed by mesh-workstation: %s -->\n' "$name"
     printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+    printf '<!-- Managed by mesh-workstation: %s -->\n' "$name"
     printf '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
     printf '<plist version="1.0"><dict>\n'
     printf '<key>Label</key><string>%s</string>\n' "$label"
