@@ -49,6 +49,10 @@ bundles:
         type: brew-formula
         spec: lazygit
         platforms: [mac]
+      - name: yazi-mac
+        type: brew-formula
+        spec: yazi
+        platforms: [mac]
       - name: git-delta-mac
         type: brew-formula
         spec: git-delta
@@ -140,6 +144,23 @@ bundles:
         type: custom
         script: ./wsl/install-lazygit.sh
         platforms: [wsl]
+        soft_fail: true
+      - name: yazi-wsl
+        type: custom
+        script: ./wsl/install-yazi.sh
+        platforms: [wsl]
+        soft_fail: true
+      - name: yazi-config
+        type: custom
+        script: ./link-yazi-config.sh
+        idempotent: true
+      - name: yazi-flavor
+        type: custom
+        script: ./install-yazi-flavor.sh
+        soft_fail: true
+      - name: yazi-herdr-plugin
+        type: custom
+        script: ./install-herdr-yazi-plugin.sh
         soft_fail: true
       - name: git-delta-wsl
         type: custom
