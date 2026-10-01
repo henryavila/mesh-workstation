@@ -32,6 +32,8 @@ structure.
 | `shell/aliases.sh.example` | personal shell | git/ls/nav aliases (overwrite mode) |
 | `git/gitconfig.local.example` | identity config | `[user]` block with placeholders (once mode) |
 | `ssh/authorized_keys.example` | secrets | managed_block markers (0600) |
+| `ssh/peers.list.example` | identity config | SSH aliases to verify after enrollment |
+| `iterm2/font.json.example` | identity config | preferred terminal font size and ligatures |
 | `.ai/memory/MEMORY.md.example` | agent memory index | empty index template |
 | `.ai/memory/PROJECT_STATUS.md.example` | rollup dashboard | §1-§5 skeleton |
 
