@@ -47,18 +47,22 @@ In Cloudflare Zero Trust, add a **self-hosted web application** for that exact
 hostname. Its Allow policy must include only your email (not Everyone or an
 entire domain). Choose an available identity provider, such as One-time PIN,
 and leave browser-rendered SSH/RDP/VNC disabled: `tuios-web` is already the
-browser application. After saving the policy, complete the handoff:
+browser application. Copy its 64-character **Application Audience (AUD) tag**
+from the Access application overview. It identifies the app but is not a
+credential. After saving the policy, complete the handoff:
 
 ```sh
-mesh tuios setup --host laptop --confirm-access-email you@example.com
+mesh tuios setup --host laptop --confirm-access-email you@example.com --access-aud AUD_TAG
 mesh tuios doctor --host laptop
 ```
 
 The first command checks that anonymous HTTPS is redirected to Cloudflare
-Access before removing the origin password. Re-running setup is safe: it does
-not rotate a healthy tunnel or rewrite unrelated DNS. If Access disappears,
-re-running setup restores the password gate. `mesh tuios status` prints the
-configured URL and session without revealing credentials. Run
+Access, configures the connector to require a valid JWT for that application's
+AUD, validates and restarts the connector, and only then removes the origin
+password. Re-running setup is safe: it does not rotate a healthy tunnel or
+rewrite unrelated DNS. If Access or the connector JWT gate disappears,
+re-running setup restores the password gate. `mesh tuios status` reports the
+configured URL and runtime health without revealing credentials. Run
 `mesh tuios disable --host laptop` to stop only Mesh-managed public services
 while preserving DNS, the Access app, private profile and tunnel credential.
 
@@ -77,11 +81,12 @@ when the user logs in. A TUIOS daemon restart or host reboot restores the
 layout and opens fresh shells; it does not preserve running processes.
 
 The browser terminal is a shell as the local service user. Keep the origin on
-loopback and the exact-email Access policy active. The Cloudflare hostname is
-only a codename, not an access control. For the current crc pilot, `mesh tuios
-status` and `mesh tuios doctor` are read-only; setup preserves the existing
-unmanaged services rather than replacing them automatically. Validate new
-macOS and WSL hosts manually before relying on them for remote work.
+loopback, the connector JWT gate enabled and the exact-email Access policy
+active. The Cloudflare hostname is only a codename, not an access control.
+The current crc pilot predates connector JWT enforcement; `mesh tuios status`
+can inspect it, while `doctor` reports the missing gate without changing its
+unmanaged services. Validate new macOS and WSL hosts manually before relying
+on them for remote work.
 
 **Installs:** `openssh-server` + `mosh` + `tailscale`. Activates sshd, enables systemd on WSL (`/etc/wsl.conf`).
 

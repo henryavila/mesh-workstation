@@ -10,10 +10,13 @@ export MESH_WORKSTATION_DIR
 . "$RUNNER_ROOT/scripts/lib/env.sh"
 # shellcheck source=/dev/null
 . "$RUNNER_ROOT/topics/remote-access/tuios/profile.sh"
+# shellcheck source=/dev/null
+. "$RUNNER_ROOT/topics/remote-access/tuios/config.sh"
 
 usage() {
     cat <<'EOF'
 Usage: mesh tuios <setup|status|doctor|disable> [--host ALIAS]
+       mesh tuios setup --host ALIAS --confirm-access-email EMAIL --access-aud AUD
 
   setup   Configure a private host profile and protected Cloudflare publication
   status  Show this host's browser URL, shared session and service state
@@ -33,11 +36,12 @@ verb="${1:---help}"
 shift 2>/dev/null || true
 case "$verb" in -h|--help|help) usage; exit 0 ;; setup|status|doctor|disable) ;; *) usage >&2; die "unknown verb: $verb" ;; esac
 
-host="" confirm_email=""
+host="" confirm_email="" access_aud=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --host) [[ $# -ge 2 ]] || die '--host needs an alias'; host="$2"; shift 2 ;;
         --confirm-access-email) [[ $# -ge 2 ]] || die '--confirm-access-email needs an address'; confirm_email="$2"; shift 2 ;;
+        --access-aud) [[ $# -ge 2 ]] || die '--access-aud needs an audience tag'; access_aud="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown option: $1" ;;
     esac
@@ -49,13 +53,14 @@ if [[ "$verb" == setup || "$verb" == disable ]]; then
     args=()
     if [[ -n "$host" ]]; then args=(--host "$host"); fi
     if [[ "$verb" == disable ]]; then
-        [[ -z "$confirm_email" ]] || die '--confirm-access-email applies only to setup'
+        [[ -z "$confirm_email" && -z "$access_aud" ]] || die 'Access confirmation applies only to setup'
         args+=(--disable)
     fi
     if [[ -n "$confirm_email" ]]; then args+=(--confirm-access-email "$confirm_email"); fi
+    if [[ -n "$access_aud" ]]; then args+=(--access-aud "$access_aud"); fi
     exec bash "$script" "${args[@]}"
 fi
-[[ -z "$confirm_email" ]] || die '--confirm-access-email applies only to setup'
+[[ -z "$confirm_email" && -z "$access_aud" ]] || die 'Access confirmation applies only to setup'
 
 alias_name="$(tuios_profile_alias "$host")" || exit 1
 hostname="$(tuios_profile_get "$alias_name" public_hostname)" || exit 1
@@ -126,6 +131,19 @@ else
     healthy=0
 fi
 
+access_team="$(tuios_profile_get "$alias_name" access_team 2>/dev/null || true)"
+access_aud="$(tuios_profile_get "$alias_name" access_aud 2>/dev/null || true)"
+config="${TUIOS_CLOUDFLARED_DIR:-$HOME/.cloudflared}/mesh-tuios-$alias_name.yml"
+if [[ -n "$access_team" && -n "$access_aud" ]] &&
+    tuios_config_matches "$config" "$tunnel_id" "$hostname" "$remote_port" \
+        "${TUIOS_CLOUDFLARED_DIR:-$HOME/.cloudflared}/$tunnel_id.json" jwt "$access_team" "$access_aud" &&
+    "$cloudflared" tunnel --config "$config" ingress validate >/dev/null 2>&1; then
+    printf 'origin JWT: required\n'
+else
+    printf 'origin JWT: missing or invalid\n'
+    healthy=0
+fi
+
 if tuios_access_redirect_ok "$hostname"; then
     printf 'Access: protected\n'
 else
@@ -133,5 +151,9 @@ else
     healthy=0
 fi
 if [[ "$verb" == doctor && "$healthy" -ne 1 ]]; then
-    die "health check failed; run bash setup.sh --bundle remote-access/tuios --bundle remote-access/tuios-cloudflare, then mesh tuios setup --host $alias_name"
+    if [[ "${TUIOS_TEST_OS:-$(uname -s)}" == Linux ]] &&
+        ! service_running "tuios-tunnel-$alias_name" && service_running "cloudflared-tuios-$alias_name"; then
+        die 'legacy unmanaged tunnel is running; see the TUIOS migration guidance before replacing it'
+    fi
+    die "health check failed; run bash setup.sh interactively and retain other selections, then mesh tuios setup --host $alias_name"
 fi

@@ -16,13 +16,16 @@ tuios_profile_validate() {
       all(.hosts | to_entries[];
         (.key | test("^[a-z][a-z0-9_-]*$")) and
         (.value | type == "object") and
-        (.value | (keys - ["access_email", "local_port", "public_hostname", "remote_port", "session", "system_hostname", "tunnel_id"]) | length == 0) and
+        (.value | (keys - ["access_aud", "access_email", "access_team", "local_port", "public_hostname", "remote_port", "session", "system_hostname", "tunnel_id"]) | length == 0) and
         (.value.system_hostname | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9.-]*$")) and
         (.value.public_hostname | type == "string" and test("^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$")) and
         (.value.access_email | type == "string" and test("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")) and
         (.value.session | type == "string" and test("^[A-Za-z0-9._-]+$")) and
         (.value.local_port | type == "number" and floor == . and . >= 1 and . <= 65535) and
         (.value.remote_port | type == "number" and floor == . and . >= 1 and . <= 65535) and
+        ((.value.access_aud == null and .value.access_team == null) or
+          ((.value.access_aud | type == "string" and test("^[0-9a-fA-F]{64}$")) and
+           (.value.access_team | type == "string" and test("^[a-z0-9][a-z0-9-]*$")))) and
         (.value.tunnel_id == null or (.value.tunnel_id | type == "string" and test("^[0-9a-fA-F-]{36}$")))
       )
     ' "$file" >/dev/null 2>&1 || {
@@ -59,9 +62,14 @@ tuios_profile_get() {
 }
 
 tuios_access_redirect_ok() {
+    tuios_access_team "$1" >/dev/null
+}
+
+tuios_access_team() {
     local hostname="$1" headers status location
     headers="$(curl -sSI --connect-timeout 8 --max-time 15 "https://$hostname/")" || return 1
     status="$(printf '%s\n' "$headers" | awk 'toupper($1) ~ /^HTTP\// {code=$2} END {print code}' | tr -d '\r')"
     location="$(printf '%s\n' "$headers" | awk 'tolower($1)=="location:" {print $2; exit}' | tr -d '\r')"
-    [[ "$status" == 302 && "$location" =~ ^https://[A-Za-z0-9.-]+\.cloudflareaccess\.com/ ]]
+    [[ "$status" == 302 && "$location" =~ ^https://([a-z0-9][a-z0-9-]*)\.cloudflareaccess\.com/ ]] || return 1
+    printf '%s' "${BASH_REMATCH[1]}"
 }

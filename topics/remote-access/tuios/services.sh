@@ -151,13 +151,18 @@ _tuios_service_apply() {
                 printf 'tuios: refusing to replace foreign LaunchAgent %s\n' "$path" >&2
                 return 1
             else
+                if [[ -f "$path" && "${TUIOS_SERVICE_DRY_RUN:-0}" != 1 ]]; then
+                    launchctl bootout "gui/$(id -u)/$label" >/dev/null 2>&1 || true
+                    if launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
+                        rm -f "$tmp"
+                        printf 'tuios: could not unload old LaunchAgent %s; keeping its original plist\n' "$label" >&2
+                        return 1
+                    fi
+                fi
                 mv -f "$tmp" "$path"
                 changed=1
             fi
             [[ "${TUIOS_SERVICE_DRY_RUN:-0}" == 1 ]] && return 0
-            if [[ "$changed" -eq 1 ]]; then
-                launchctl bootout "gui/$(id -u)/$label" >/dev/null 2>&1 || true
-            fi
             if ! launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
                 launchctl bootstrap "gui/$(id -u)" "$path" || return 1
             fi
@@ -206,6 +211,46 @@ tuios_service_apply_tunnel() {
     bin="${TUIOS_CLOUDFLARED_BIN_DIR:-$HOME/.local/bin}/cloudflared"
     [[ -x "$bin" ]] || return 1
     _tuios_service_apply "tuios-tunnel-$alias" "$bin" --config "$config" tunnel --protocol http2 --no-autoupdate run "$tunnel_id"
+}
+
+tuios_service_restart_tunnel() {
+    local alias="$1" name path os
+    [[ "$alias" =~ ^[a-z][a-z0-9_-]*$ ]] || return 1
+    [[ "${TUIOS_SERVICE_DRY_RUN:-0}" == 1 ]] && return 0
+    name="tuios-tunnel-$alias"
+    os="$(_tuios_service_os)"
+    case "$os" in
+        Linux)
+            path="$(_tuios_service_systemd_dir)/$name.service"
+            [[ -f "$path" ]] && grep -qFx "# Managed by mesh-workstation: $name" "$path" || return 1
+            systemctl --user restart "$name.service"
+            ;;
+        Darwin)
+            path="$(_tuios_service_launchd_dir)/com.mesh.$name.plist"
+            [[ -f "$path" ]] && grep -qF "Managed by mesh-workstation: $name" "$path" || return 1
+            launchctl kickstart -k "gui/$(id -u)/com.mesh.$name"
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+tuios_service_origin_is_noauth() {
+    local path
+    case "$(_tuios_service_os)" in
+        Linux)
+            path="$(_tuios_service_systemd_dir)/tuios-web-remote.service"
+            [[ -f "$path" ]] &&
+                grep -qFx '# Managed by mesh-workstation: tuios-web-remote' "$path" &&
+                grep -qF -- '--no-auth' "$path"
+            ;;
+        Darwin)
+            path="$(_tuios_service_launchd_dir)/com.mesh.tuios-web-remote.plist"
+            [[ -f "$path" ]] &&
+                grep -qF 'Managed by mesh-workstation: tuios-web-remote' "$path" &&
+                grep -qF '<string>--no-auth</string>' "$path"
+            ;;
+        *) return 1 ;;
+    esac
 }
 
 check() {
@@ -283,6 +328,10 @@ _tuios_service_remove_names() {
             if [[ ! -f "$path" ]] || ! grep -qF "$marker" "$path"; then continue; fi
             if [[ "${TUIOS_SERVICE_DRY_RUN:-0}" != 1 ]]; then
                 launchctl bootout "gui/$(id -u)/com.mesh.$name" >/dev/null 2>&1 || true
+                if launchctl print "gui/$(id -u)/com.mesh.$name" >/dev/null 2>&1; then
+                    printf 'tuios: could not unload public LaunchAgent %s; keeping its plist\n' "$name" >&2
+                    return 1
+                fi
             fi
             rm -f "$path"
         fi

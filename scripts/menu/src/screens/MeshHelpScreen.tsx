@@ -141,6 +141,7 @@ export const MESH_HELP_COMMANDS: HelpCommand[] = [
     summary: 'Browser terminal access',
     details: [
       'Configures one protected browser URL per machine while sharing its local TUIOS session.',
+      'After creating the Access app, confirm its email policy and supply its Application AUD tag.',
       'Use status and doctor to inspect the host, or disable to stop only Mesh-managed public services.',
     ],
   },

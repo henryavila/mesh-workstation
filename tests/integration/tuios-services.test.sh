@@ -90,7 +90,9 @@ install
 mkdir -p "$SANDBOX/launchctl-bin"
 cat > "$SANDBOX/launchctl-bin/launchctl" <<'SH'
 #!/bin/sh
-printf 'state = %s\n' "${TUIOS_TEST_LAUNCH_STATE:-waiting}"
+if [ -n "${TUIOS_TEST_LAUNCH_LOG:-}" ]; then printf '%s\n' "$*" >> "$TUIOS_TEST_LAUNCH_LOG"; fi
+if [ "$1" = bootout ] && [ "${TUIOS_TEST_BOOTOUT_FAIL:-0}" = 1 ]; then exit 1; fi
+if [ "$1" = print ]; then printf 'state = %s\n' "${TUIOS_TEST_LAUNCH_STATE:-waiting}"; fi
 SH
 chmod +x "$SANDBOX/launchctl-bin/launchctl"
 old_path="$PATH"
@@ -99,6 +101,20 @@ export TUIOS_SERVICE_DRY_RUN=0 TUIOS_TEST_LAUNCH_STATE=waiting
 if check; then fail "Mac check rejects loaded but stopped LaunchAgent"; else pass "Mac check rejects loaded but stopped LaunchAgent"; fi
 export TUIOS_TEST_LAUNCH_STATE=running
 if check; then pass "Mac check accepts running LaunchAgent"; else fail "Mac check accepts running LaunchAgent"; fi
+export TUIOS_TEST_LAUNCH_LOG="$SANDBOX/launchctl.log"
+printf '<!-- Managed by mesh-workstation: tuios-tunnel-testbox -->\n' > "$TUIOS_LAUNCHD_DIR/com.mesh.tuios-tunnel-testbox.plist"
+if tuios_service_restart_tunnel testbox; then pass "Mac restarts the managed JWT connector"; else fail "Mac restarts the managed JWT connector"; fi
+assert_pattern_present "$TUIOS_TEST_LAUNCH_LOG" 'kickstart -k gui/[0-9]+/com.mesh.tuios-tunnel-testbox' "Mac connector restart uses kickstart"
+export TUIOS_SERVICE_DRY_RUN=1
+tuios_service_apply_remote 'codename.example.com' 7685 access
+printf 'test-password\n' > "$SANDBOX/mac-password"
+chmod 0600 "$SANDBOX/mac-password"
+export TUIOS_WEB_PASSWORD_FILE="$SANDBOX/mac-password"
+export TUIOS_SERVICE_DRY_RUN=0 TUIOS_TEST_BOOTOUT_FAIL=1
+if tuios_service_apply_remote 'codename.example.com' 7685 password; then fail "Mac refuses to claim a password switch when no-auth job stays loaded"; else pass "Mac refuses to claim a password switch when no-auth job stays loaded"; fi
+if tuios_service_disable_public; then fail "Mac quarantine fails when bootout leaves the public job loaded"; else pass "Mac quarantine fails when bootout leaves the public job loaded"; fi
+assert_file_exists "$TUIOS_LAUNCHD_DIR/com.mesh.tuios-web-remote.plist" "failed Mac quarantine keeps service file for recovery"
+unset TUIOS_TEST_BOOTOUT_FAIL TUIOS_WEB_PASSWORD_FILE
 export PATH="$old_path" TUIOS_SERVICE_DRY_RUN=1
 
 mkdir -p "$SANDBOX/linger-bin"
@@ -135,5 +151,19 @@ else
 fi
 tunnel_unit="$TUIOS_SYSTEMD_DIR/tuios-tunnel-testbox.service"
 assert_file_contains "$tunnel_unit" 'tunnel --protocol http2 --no-autoupdate run 00000000-1111-4222-8333-444444444444' "connector uses HTTP/2 with fixed tunnel ID"
+mkdir -p "$SANDBOX/restart-bin"
+export TUIOS_TEST_SYSTEMCTL_LOG="$SANDBOX/systemctl.log"
+cat > "$SANDBOX/restart-bin/systemctl" <<'SH'
+#!/bin/sh
+printf '%s\n' "$*" >> "$TUIOS_TEST_SYSTEMCTL_LOG"
+SH
+chmod +x "$SANDBOX/restart-bin/systemctl"
+old_path="$PATH"
+export PATH="$SANDBOX/restart-bin:$PATH" TUIOS_SERVICE_DRY_RUN=0
+if tuios_service_restart_tunnel testbox; then pass "JWT transition restarts the managed connector"; else fail "JWT transition restarts the managed connector"; fi
+assert_file_contains "$TUIOS_TEST_SYSTEMCTL_LOG" 'restart tuios-tunnel-testbox.service' "managed connector restart reaches systemd"
+printf '[Service]\nExecStart=/usr/bin/other\n' > "$tunnel_unit"
+if tuios_service_restart_tunnel testbox; then fail "foreign connector is not restarted"; else pass "foreign connector is not restarted"; fi
+export PATH="$old_path" TUIOS_SERVICE_DRY_RUN=1
 
 summary

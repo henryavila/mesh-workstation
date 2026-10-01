@@ -29,7 +29,9 @@ cat > "$MESH_TUIOS_PROFILE" <<'JSON'
       "session": "web",
       "local_port": 7681,
       "remote_port": 7685,
-      "tunnel_id": "00000000-1111-4222-8333-444444444444"
+      "tunnel_id": "00000000-1111-4222-8333-444444444444",
+      "access_team": "team",
+      "access_aud": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     }
   }
 }
@@ -78,6 +80,10 @@ rc=$?
 assert_eq "$rc" 0 "setup accepts exact Access email confirmation"
 assert_contains "$out" 'argc=4' "setup forwards confirmation to publisher"
 assert_contains "$out" 'arg=user@example.com' "publisher receives confirmed email"
+out="$(bash "$ROOT/bin/mesh" tuios setup --host testbox --confirm-access-email user@example.com --access-aud 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef 2>&1)"
+rc=$?
+assert_eq "$rc" 0 "setup accepts an Access application audience"
+assert_contains "$out" 'arg=--access-aud' "setup forwards the audience to the publisher"
 out="$(bash "$ROOT/bin/mesh" tuios disable --host testbox 2>&1)"
 rc=$?
 assert_eq "$rc" 0 "disable delegates to publisher"
@@ -120,6 +126,24 @@ chmod +x "$SANDBOX/fakebin/systemctl" "$SANDBOX/fakebin/curl" "$SANDBOX/fakebin/
 old_path="$PATH"
 export PATH="$SANDBOX/fakebin:$PATH"
 export TUIOS_BIN_DIR="$SANDBOX/fakebin" TUIOS_CLOUDFLARED_BIN_DIR="$SANDBOX/fakebin"
+export TUIOS_CLOUDFLARED_DIR="$SANDBOX/cloudflared"
+mkdir -p "$TUIOS_CLOUDFLARED_DIR"
+cat > "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.yml" <<YAML
+# Managed by mesh-workstation: TUIOS browser access
+tunnel: 00000000-1111-4222-8333-444444444444
+credentials-file: $TUIOS_CLOUDFLARED_DIR/00000000-1111-4222-8333-444444444444.json
+
+ingress:
+  - hostname: quiet-otter.example.com
+    service: http://127.0.0.1:7685
+    originRequest:
+      access:
+        required: true
+        teamName: team
+        audTag:
+          - 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  - service: http_status:404
+YAML
 export TUIOS_SERVICE_DRY_RUN=0 TUIOS_TEST_ACCESS_STATUS=302
 out="$(bash "$ROOT/bin/mesh" tuios status --host testbox 2>&1)"
 rc=$?
@@ -127,6 +151,13 @@ assert_eq "$rc" 0 "status is readable when healthy"
 assert_contains "$out" 'versions: tuios=0.8.4 tuios-web=0.8.4 cloudflared=2026.9.3' "status reports installed versions"
 assert_contains "$out" 'tunnel: connected' "status reports edge connection"
 assert_contains "$out" 'Access: protected' "status reports the public gate"
+assert_contains "$out" 'origin JWT: required' "status reports connector JWT enforcement"
+sed 's/required: true/required: false\n        # required: true/' "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.yml" > "$SANDBOX/false-jwt.yml"
+cp "$SANDBOX/false-jwt.yml" "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.yml"
+out="$(bash "$ROOT/bin/mesh" tuios doctor --host testbox 2>&1)"
+rc=$?
+assert_ne "$rc" 0 "doctor rejects a false JWT gate even when a comment says required true"
+sed 's/required: false/required: true/' "$SANDBOX/false-jwt.yml" | sed '/# required: true/d' > "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.yml"
 out="$(bash "$ROOT/bin/mesh" tuios doctor --host testbox 2>&1)"
 rc=$?
 assert_eq "$rc" 0 "doctor accepts active services with Access redirect"
@@ -138,6 +169,12 @@ out="$(bash "$ROOT/bin/mesh" tuios doctor --host testbox 2>&1)"
 rc=$?
 assert_ne "$rc" 0 "doctor rejects a tunnel with no edge connector"
 export TUIOS_TEST_EDGE=connected
+mv "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.yml" "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.disabled"
+out="$(bash "$ROOT/bin/mesh" tuios doctor --host testbox 2>&1)"
+rc=$?
+assert_ne "$rc" 0 "doctor rejects a missing connector JWT gate"
+assert_not_contains "$out" '--bundle' "doctor does not suggest replacing all saved bundles"
+mv "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.disabled" "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.yml"
 export TUIOS_TEST_ACCESS_STATUS=200
 out="$(bash "$ROOT/bin/mesh" tuios doctor --host testbox 2>&1)"
 rc=$?

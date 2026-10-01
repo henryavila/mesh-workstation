@@ -9,9 +9,19 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "$HERE/profile.sh"
 # shellcheck source=/dev/null
+. "$HERE/config.sh"
+# shellcheck source=/dev/null
 . "$HERE/services.sh"
 
 _tuios_publish_fail() { printf 'mesh tuios setup: %s\n' "$*" >&2; exit 1; }
+_tuios_publish_exit() {
+    local rc=$?
+    if [[ "$rc" -ne 0 && "${TUIOS_PUBLISH_NOAUTH_RISK:-0}" == 1 ]]; then
+        if ! tuios_service_disable_public; then
+            printf 'mesh tuios setup: CRITICAL: could not verify shutdown of the no-auth publication; stop its tunnel service manually\n' >&2
+        fi
+    fi
+}
 _tuios_cf_dir() { printf '%s' "${TUIOS_CLOUDFLARED_DIR:-$HOME/.cloudflared}"; }
 _tuios_cf_bin() { printf '%s' "${TUIOS_CLOUDFLARED_BIN_DIR:-$HOME/.local/bin}/cloudflared"; }
 _tuios_password_file() { printf '%s' "${TUIOS_WEB_PASSWORD_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/tuios/web-password}"; }
@@ -70,6 +80,17 @@ _tuios_profile_set_tunnel_id() {
     mv -f "$tmp" "$file"
 }
 
+_tuios_profile_set_access() {
+    local file="$1" alias_name="$2" team="$3" aud="$4" tmp
+    tmp="$(mktemp "${file}.XXXXXX")" || return 1
+    jq --arg alias "$alias_name" --arg team "$team" --arg aud "$aud" \
+        '.hosts[$alias].access_team = $team | .hosts[$alias].access_aud = $aud' \
+        "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
+    MESH_TUIOS_PROFILE="$tmp" tuios_profile_validate || { rm -f "$tmp"; return 1; }
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$file"
+}
+
 _tuios_tunnel_id_by_name() {
     local bin="$1" name="$2" listing
     listing="$("$bin" tunnel list --output json --name "$name")" || return 1
@@ -89,19 +110,18 @@ _tuios_publish_password() {
 }
 
 _tuios_publish_config() {
-    local file="$1" id="$2" hostname="$3" port="$4" creds="$5" tmp
+    local file="$1" id="$2" hostname="$3" port="$4" creds="$5" mode="$6" team="$7" aud="$8" bin="$9" tmp
+    TUIOS_PUBLISH_CONFIG_CHANGED=0
     tmp="$(mktemp "${file}.XXXXXX")" || return 1
-    cat > "$tmp" <<EOF
-# Managed by mesh-workstation: TUIOS browser access
-tunnel: $id
-credentials-file: $creds
-
-ingress:
-  - hostname: $hostname
-    service: http://127.0.0.1:$port
-  - service: http_status:404
-EOF
+    tuios_config_render "$id" "$hostname" "$port" "$creds" "$mode" "$team" "$aud" > "$tmp" || {
+        rm -f "$tmp"; return 1;
+    }
     chmod 0600 "$tmp"
+    if ! "$bin" tunnel --config "$tmp" ingress validate >/dev/null 2>&1; then
+        rm -f "$tmp"
+        printf 'mesh tuios setup: cloudflared rejected the tunnel ingress configuration\n' >&2
+        return 1
+    fi
     if [[ -f "$file" ]] && cmp -s "$file" "$tmp"; then rm -f "$tmp"; return 0; fi
     if [[ -f "$file" ]] && ! grep -qF '# Managed by mesh-workstation: TUIOS browser access' "$file"; then
         rm -f "$tmp"
@@ -109,16 +129,18 @@ EOF
         return 1
     fi
     mv -f "$tmp" "$file"
+    TUIOS_PUBLISH_CONFIG_CHANGED=1
 }
 
-host_arg="" confirm_email="" disable=0
+host_arg="" confirm_email="" access_aud_arg="" disable=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --host) [[ $# -ge 2 ]] || _tuios_publish_fail '--host needs an alias'; host_arg="$2"; shift 2 ;;
         --confirm-access-email) [[ $# -ge 2 ]] || _tuios_publish_fail '--confirm-access-email needs an address'; confirm_email="$2"; shift 2 ;;
+        --access-aud) [[ $# -ge 2 ]] || _tuios_publish_fail '--access-aud needs an audience tag'; access_aud_arg="$2"; shift 2 ;;
         --disable) disable=1; shift ;;
         -h|--help)
-            printf 'Usage: mesh tuios setup [--host ALIAS] [--confirm-access-email EMAIL]\n'
+            printf 'Usage: mesh tuios setup [--host ALIAS] [--confirm-access-email EMAIL --access-aud AUD]\n'
             exit 0
             ;;
         *) _tuios_publish_fail "unknown option $1" ;;
@@ -126,13 +148,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$disable" == 1 ]]; then
-    [[ -z "$confirm_email" ]] || _tuios_publish_fail '--disable cannot confirm Access'
+    [[ -z "$confirm_email" && -z "$access_aud_arg" ]] || _tuios_publish_fail '--disable cannot confirm Access'
     alias_name="$(tuios_profile_alias "$host_arg")" || exit 1
     tuios_service_public_safe_to_disable "$alias_name" || exit 1
     uninstall "tuios-tunnel-$alias_name" tuios-web-remote || exit 1
     printf 'Public TUIOS services stopped for %s; Cloudflare DNS, Access and credentials preserved.\n' "$alias_name"
     exit 0
 fi
+[[ -z "$access_aud_arg" || -n "$confirm_email" ]] || _tuios_publish_fail '--access-aud requires --confirm-access-email'
+[[ -z "$access_aud_arg" || "$access_aud_arg" =~ ^[0-9a-fA-F]{64}$ ]] || _tuios_publish_fail 'Access AUD must be 64 hex characters'
 
 _tuios_profile_seed "$host_arg" || exit 1
 alias_name="$(tuios_profile_alias "${host_arg:-${MESH_TUIOS_SETUP_ALIAS:-}}")" || exit 1
@@ -178,27 +202,54 @@ password_file="$(_tuios_password_file)"
 export TUIOS_WEB_PASSWORD_FILE="$password_file"
 export TUIOS_SESSION="$session" TUIOS_LOCAL_PORT="$local_port"
 mkdir -p "$cf_dir"
+profile_team="$(tuios_profile_get "$alias_name" access_team 2>/dev/null || true)"
+profile_aud="$(tuios_profile_get "$alias_name" access_aud 2>/dev/null || true)"
+TUIOS_PUBLISH_NOAUTH_RISK=0
+if tuios_service_origin_is_noauth; then TUIOS_PUBLISH_NOAUTH_RISK=1; fi
+trap _tuios_publish_exit EXIT
 
 if [[ -f "$ready_marker" ]]; then
-    [[ "$(cat "$ready_marker")" == "$tunnel_id $hostname $email" ]] || _tuios_publish_fail 'Access marker conflicts with profile'
-    if tuios_access_redirect_ok "$hostname"; then
+    redirect_team="$(tuios_access_team "$hostname" 2>/dev/null || true)"
+    if [[ -n "$profile_team" && -n "$profile_aud" && "$redirect_team" == "$profile_team" && \
+          "$(cat "$ready_marker")" == "$tunnel_id $hostname $email $profile_team $profile_aud" && \
+          -f "$config" ]] &&
+        tuios_config_matches "$config" "$tunnel_id" "$hostname" "$remote_port" "$credentials" jwt "$profile_team" "$profile_aud" &&
+        "$cf_bin" tunnel --config "$config" ingress validate >/dev/null 2>&1; then
         mode=access
     else
-        # Revoke the no-auth origin before returning: a removed Access app
-        # must not make the already-published tunnel an open shell.
-        rm -f "$ready_marker"
+        # Revoke the no-auth origin before returning. A removed Access app,
+        # legacy marker, or missing JWT gate must not leave an open shell.
+        if [[ "$TUIOS_PUBLISH_NOAUTH_RISK" == 1 ]]; then
+            tuios_service_disable_public || _tuios_publish_fail 'could not stop the unsafe publication'
+            TUIOS_PUBLISH_NOAUTH_RISK=0
+        fi
         _tuios_publish_password "$password_file" || _tuios_publish_fail 'cannot restore origin password'
-        tuios_service_apply_remote "$hostname" "$remote_port" password || exit 1
-        _tuios_publish_fail 'Cloudflare Access redirect disappeared; restored the origin password gate'
+        tuios_service_apply_remote "$hostname" "$remote_port" password || _tuios_publish_fail 'could not restore the password origin after stopping publication'
+        rm -f "$ready_marker"
+        _tuios_publish_fail 'Access or connector JWT gate changed; restored the origin password gate'
     fi
 else
     mode=password
+    if [[ "$TUIOS_PUBLISH_NOAUTH_RISK" == 1 ]]; then
+        tuios_service_disable_public || _tuios_publish_fail 'could not stop the unmarked no-auth publication'
+        TUIOS_PUBLISH_NOAUTH_RISK=0
+    fi
     _tuios_publish_password "$password_file" || _tuios_publish_fail 'cannot create protected origin password'
 fi
-tuios_service_apply_remote "$hostname" "$remote_port" "$mode" || exit 1
+if [[ "$mode" == password ]]; then
+    tuios_service_apply_remote "$hostname" "$remote_port" password || exit 1
+fi
 tuios_service_apply_local || exit 1
-_tuios_publish_config "$config" "$tunnel_id" "$hostname" "$remote_port" "$credentials" || exit 1
+if [[ "$mode" == access ]]; then gate=jwt; else gate=password; fi
+_tuios_publish_config "$config" "$tunnel_id" "$hostname" "$remote_port" "$credentials" \
+    "$gate" "$profile_team" "$profile_aud" "$cf_bin" || exit 1
 tuios_service_apply_tunnel "$alias_name" "$config" "$tunnel_id" || exit 1
+if [[ "$mode" == access ]]; then
+    if [[ "$TUIOS_PUBLISH_CONFIG_CHANGED" == 1 ]]; then
+        tuios_service_restart_tunnel "$alias_name" || exit 1
+    fi
+    tuios_service_apply_remote "$hostname" "$remote_port" access || exit 1
+fi
 
 if [[ -f "$route_marker" ]]; then
     [[ "$(cat "$route_marker")" == "$tunnel_id $hostname" ]] || _tuios_publish_fail 'DNS route marker conflicts with profile'
@@ -210,13 +261,27 @@ else
 fi
 
 if [[ -n "$confirm_email" ]]; then
-    tuios_access_redirect_ok "$hostname" || _tuios_publish_fail 'anonymous HTTPS does not redirect to Cloudflare Access; password remains active'
-    tuios_service_apply_remote "$hostname" "$remote_port" access || exit 1
-    printf '%s %s %s\n' "$tunnel_id" "$hostname" "$email" > "$ready_marker"
+    team="$(tuios_access_team "$hostname")" || _tuios_publish_fail 'anonymous HTTPS does not redirect to Cloudflare Access; password remains active'
+    aud="${access_aud_arg:-$profile_aud}"
+    [[ "$aud" =~ ^[0-9a-fA-F]{64}$ ]] || _tuios_publish_fail 'provide the 64-character Access application AUD with --access-aud; password remains active'
+    [[ -z "$profile_team" || "$profile_team" == "$team" ]] || _tuios_publish_fail 'Access team changed; password remains active'
+    [[ -z "$profile_aud" || "$profile_aud" == "$aud" ]] || _tuios_publish_fail 'Access AUD changed; password remains active'
+    if [[ "$mode" == password ]]; then
+        _tuios_publish_config "$config" "$tunnel_id" "$hostname" "$remote_port" "$credentials" \
+            jwt "$team" "$aud" "$cf_bin" || exit 1
+        tuios_service_restart_tunnel "$alias_name" || _tuios_publish_fail 'JWT connector restart failed; password remains active'
+        _tuios_profile_set_access "$(tuios_profile_path)" "$alias_name" "$team" "$aud" || exit 1
+        TUIOS_PUBLISH_NOAUTH_RISK=1
+        tuios_service_apply_remote "$hostname" "$remote_port" access || exit 1
+    fi
+    printf '%s %s %s %s %s\n' "$tunnel_id" "$hostname" "$email" "$team" "$aud" > "$ready_marker"
     chmod 0600 "$ready_marker"
+    printf 'Access ready: https://%s/ (allowed email: %s)\n' "$hostname" "$email"
+elif [[ "$mode" == access ]]; then
     printf 'Access ready: https://%s/ (allowed email: %s)\n' "$hostname" "$email"
 else
     printf 'Protected origin staged at https://%s/\n' "$hostname"
     printf 'In Cloudflare Access, allow only %s for this exact hostname.\n' "$email"
-    printf 'After saving the policy, run: mesh tuios setup --host %s --confirm-access-email %s\n' "$alias_name" "$email"
+    printf 'Copy the application AUD tag from Cloudflare Access, then run:\n'
+    printf 'mesh tuios setup --host %s --confirm-access-email %s --access-aud AUD_TAG\n' "$alias_name" "$email"
 fi

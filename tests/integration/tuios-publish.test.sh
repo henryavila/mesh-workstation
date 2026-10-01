@@ -5,6 +5,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 PUBLISH="$ROOT/topics/remote-access/tuios/publish.sh"
+AUD=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 # shellcheck source=../lib/assert.sh
 # shellcheck disable=SC1091
 source "$HERE/../lib/assert.sh"
@@ -36,6 +37,15 @@ cat > "$TUIOS_BIN_DIR/cloudflared" <<'SH'
 #!/bin/sh
 printf '%s\n' "$*" >> "$TUIOS_TEST_LOG"
 case "$1 $2" in
+  'tunnel --config')
+    if [ "$4 $5" = 'ingress validate' ]; then
+      [ "${TUIOS_TEST_CONFIG_VALID:-1}" = 1 ] || exit 1
+      if [ "${TUIOS_TEST_EXPECT_PASSWORD_AT_VALIDATE:-0}" = 1 ] && grep -q 'required: true' "$3"; then
+        grep -q -- '--password-file' "$TUIOS_SYSTEMD_DIR/tuios-web-remote.service" || exit 1
+      fi
+      exit 0
+    fi
+    ;;
   'tunnel info') exit 0 ;;
   'tunnel route') exit 0 ;;
   'tunnel create')
@@ -96,15 +106,59 @@ assert_file_contains "$TUIOS_SYSTEMD_DIR/tuios-web-remote.service" '.*--password
 export TUIOS_TEST_ACCESS_STATUS=302
 out="$(bash "$PUBLISH" --host testbox --confirm-access-email user@example.com 2>&1)"
 rc=$?
+assert_ne "$rc" 0 "Access confirmation requires an application AUD before no-auth"
+assert_file_contains "$TUIOS_SYSTEMD_DIR/tuios-web-remote.service" '.*--password-file' "missing AUD leaves the password gate active"
+export TUIOS_TEST_CONFIG_VALID=0
+out="$(bash "$PUBLISH" --host testbox --confirm-access-email user@example.com --access-aud "$AUD" 2>&1)"
+rc=$?
+assert_ne "$rc" 0 "invalid JWT ingress configuration blocks no-auth"
+assert_file_contains "$TUIOS_SYSTEMD_DIR/tuios-web-remote.service" '.*--password-file' "failed ingress validation preserves password"
+export TUIOS_TEST_CONFIG_VALID=1
+export TUIOS_TEST_EXPECT_PASSWORD_AT_VALIDATE=1
+out="$(bash "$PUBLISH" --host testbox --confirm-access-email user@example.com --access-aud "$AUD" 2>&1)"
+rc=$?
 assert_eq "$rc" 0 "exact email confirmation completes setup"
+unset TUIOS_TEST_EXPECT_PASSWORD_AT_VALIDATE
+assert_file_contains "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.yml" 'required: true' "connector requires an Access JWT"
+assert_file_contains "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.yml" 'teamName: team' "connector uses the redirect-derived team"
+assert_file_contains "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.yml" "$AUD" "connector pins the application audience"
+assert_eq "$(jq -r '.hosts.testbox.access_aud' "$MESH_TUIOS_PROFILE")" "$AUD" "private profile records non-secret AUD"
 assert_file_contains "$TUIOS_SYSTEMD_DIR/tuios-web-remote.service" '.*--no-auth' "ready origin delegates login to Access"
 ASSERT_MSG="ready origin omits Basic Auth" assert_false "grep -q -- '--password-file' '$TUIOS_SYSTEMD_DIR/tuios-web-remote.service'"
+out="$(bash "$PUBLISH" --host testbox 2>&1)"
+rc=$?
+assert_eq "$rc" 0 "ready publication remains usable on repeat setup"
+assert_contains "$out" 'Access ready:' "repeat setup reports the already-ready state"
+sed 's/required: true/required: false\n        # required: true/' "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.yml" > "$SANDBOX/tampered.yml"
+cp "$SANDBOX/tampered.yml" "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.yml"
+out="$(bash "$PUBLISH" --host testbox 2>&1)"
+rc=$?
+assert_ne "$rc" 0 "tampered JWT gate revokes ready publication"
+assert_file_contains "$TUIOS_SYSTEMD_DIR/tuios-web-remote.service" '.*--password-file' "tampered gate restores the origin password"
+if [[ ! -f "$TUIOS_SYSTEMD_DIR/tuios-tunnel-testbox.service" ]]; then pass "tampered gate quarantines the connector"; else fail "tampered gate quarantines the connector"; fi
+out="$(bash "$PUBLISH" --host testbox --confirm-access-email user@example.com --access-aud "$AUD" 2>&1)"
+rc=$?
+assert_eq "$rc" 0 "publication can recover after JWT gate repair"
+assert_file_contains "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.yml" 'required: true' "repair restores connector JWT requirement"
 
 export TUIOS_TEST_ACCESS_STATUS=200
 out="$(bash "$PUBLISH" --host testbox 2>&1)"
 rc=$?
 assert_ne "$rc" 0 "rerun refuses to leave public origin unprotected when Access disappears"
 assert_file_contains "$TUIOS_SYSTEMD_DIR/tuios-web-remote.service" '.*--password-file' "Access loss restores password gate"
+
+export TUIOS_TEST_ACCESS_STATUS=302
+out="$(bash "$PUBLISH" --host testbox --confirm-access-email user@example.com --access-aud "$AUD" 2>&1)"
+assert_eq "$?" 0 "ready state can be restored before testing crash recovery"
+rm "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-testbox.access-ready"
+saved_password_file="$TUIOS_WEB_PASSWORD_FILE"
+printf 'blocked\n' > "$SANDBOX/blocker"
+export TUIOS_WEB_PASSWORD_FILE="$SANDBOX/blocker/password"
+out="$(bash "$PUBLISH" --host testbox 2>&1)"
+rc=$?
+assert_ne "$rc" 0 "password-file failure does not leave prior no-auth publication running"
+if [[ ! -f "$TUIOS_SYSTEMD_DIR/tuios-tunnel-testbox.service" ]]; then pass "failed password recovery quarantines the connector"; else fail "failed password recovery quarantines the connector"; fi
+export TUIOS_WEB_PASSWORD_FILE="$saved_password_file"
 
 export MESH_IDENTITY_DIR="$SANDBOX/new-identity"
 export MESH_TUIOS_PROFILE="$MESH_IDENTITY_DIR/config/tuios-hosts.json"
