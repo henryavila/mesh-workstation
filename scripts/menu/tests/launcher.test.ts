@@ -42,7 +42,7 @@ describe('launcher tsx bootstrap', () => {
     const register = join(menuDir, 'tsx-register.mjs');
     const app = join(menuDir, 'src', 'app.tsx');
     const code =
-      `process.argv = ['node', 'index.js', 'help'];` +
+      `process.argv = ['node', 'index.js', 'help', '--commands', '/dev/null', '--details-dir', '/tmp'];` +
       `await import(${JSON.stringify(register)});` +
       `await import(${JSON.stringify(app)});`;
     let status = 0;
