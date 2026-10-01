@@ -126,3 +126,25 @@ ai_herdr_new_tab() {
 
     [[ -n "$agent" ]] && herdr pane run "$pane_id" "$agent" >/dev/null
 }
+
+# Open Yazi as a herdr plugin overlay on a project. Ensures the workspace
+# exists (create if closed, focus if open) then:
+#   herdr plugin pane open --plugin mesh.yazi --entrypoint picker --placement overlay --cwd PATH
+# F0 evidence on herdr 0.7.0. Does not open a new tab.
+ai_herdr_open_files() {
+    local name="$1" path="$2" wsid="${3:-}"
+    ai_herdr_ready || return 1
+
+    if [[ -n "$wsid" ]]; then
+        log_info "ai: focusing workspace '$name' for Yazi overlay"
+        herdr workspace focus "$wsid" >/dev/null || return $?
+    else
+        ai_herdr_open "$name" "$path" "" || return $?
+    fi
+
+    herdr plugin pane open \
+        --plugin mesh.yazi \
+        --entrypoint picker \
+        --placement overlay \
+        --cwd "$path" >/dev/null
+}

@@ -291,6 +291,28 @@ STUB
     assert_contains "$SHELL_OPEN" "tab create --workspace w456 --cwd $R1/atomic-skills --label atomic-skills --focus" "--shell on open repo → new shell tab"
     assert_not_contains "$SHELL_OPEN" "pane run" "--shell on open repo → no agent run"
 
+    # --files opens Yazi overlay (F0 argv) after ensuring the workspace exists.
+    : > "$HERDR_LOG"
+    run_ia repoC --files >/dev/null 2>&1
+    FILES_CLOSED="$(cat "$HERDR_LOG")"
+    assert_contains "$FILES_CLOSED" "workspace create --cwd $R2/repoC --label repoC --focus" "--files on closed repo → create workspace"
+    assert_contains "$FILES_CLOSED" "plugin pane open" "--files uses herdr plugin pane open"
+    assert_contains "$FILES_CLOSED" "--plugin mesh.yazi" "--files names plugin mesh.yazi"
+    assert_contains "$FILES_CLOSED" "--entrypoint picker" "--files names picker entrypoint"
+    assert_contains "$FILES_CLOSED" "--placement overlay" "--files requests overlay"
+    assert_contains "$FILES_CLOSED" "--cwd $R2/repoC" "--files overlay cwd is the repo"
+    assert_not_contains "$FILES_CLOSED" "tab create" "--files on closed repo → no tab create"
+    : > "$HERDR_LOG"
+    run_ia atomic-skills --files >/dev/null 2>&1
+    FILES_OPEN="$(cat "$HERDR_LOG")"
+    assert_contains "$FILES_OPEN" "plugin pane open" "--files on open repo → yazi overlay"
+    assert_contains "$FILES_OPEN" "--plugin mesh.yazi" "--files on open repo names mesh.yazi"
+    assert_contains "$FILES_OPEN" "--placement overlay" "--files on open repo requests overlay"
+    assert_not_contains "$FILES_OPEN" "tab create" "--files on open repo → no new tab"
+    HELP="$(sed -n '2,25p' "$RUNNER")"
+    assert_contains "$HELP" "--files" "usage header lists --files"
+    assert_exit_code 2 'run_ia repoC --not-a-real-flag' "unknown flags still exit 2"
+
     # Local preferences are sourced from ~/.config/mesh/ai.env. A shell default
     # makes Enter/fast-path open the directory without an agent.
     mkdir -p "$RHOME/.config/mesh"

@@ -17,12 +17,13 @@
 #   mesh ai <term> --grok     Shortcut for --agent grok.
 #   mesh ai <term> --codex    Shortcut for --agent codex.
 #   mesh ai <term> --shell    Open the project directory without running an agent.
+#   mesh ai <term> --files    Open Yazi as a herdr overlay picker on the project.
 #   mesh ai --list            Print the merged catalogue (discovered + pinned) and exit.
 #   mesh ai add <path> [name] Pin a dir to the catalogue (non-git OK; idempotent).
 #                            If the manifest is in git, offers to commit+push.
 #   mesh ai remove <name>     Unpin by name; also offers commit+push when in git.
 #   mesh ai list              Show pinned projects resolvable on this host.
-# Flags: --agent <name>, --grok, --claude, --codex, --shell/--dir, --list, -h/--help.
+# Flags: --agent <name>, --grok, --claude, --codex, --shell/--dir, --files, --list, -h/--help.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -219,7 +220,7 @@ case "${1:-}" in
     list)   shift; _ai_verb_list "$@"; exit $? ;;
 esac
 
-AGENT_OVERRIDE=""; FORCE_SHELL=0; LIST=0; CANDIDATES=0; TERM_ARG=""
+AGENT_OVERRIDE=""; FORCE_SHELL=0; FORCE_FILES=0; LIST=0; CANDIDATES=0; TERM_ARG=""
 while (( $# > 0 )); do
     case "$1" in
         --agent)      shift; AGENT_OVERRIDE="${1:-}" ;;
@@ -228,11 +229,12 @@ while (( $# > 0 )); do
         --claude)     AGENT_OVERRIDE="claude" ;;
         --codex)      AGENT_OVERRIDE="codex" ;;
         --shell|--dir) FORCE_SHELL=1 ;;
+        --files)      FORCE_FILES=1 ;;
         --list)       LIST=1 ;;
         --candidates) CANDIDATES=1 ;;   # debug: dump the merged candidate set
         -h|--help)    sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         --)         shift; [[ $# -gt 0 ]] && TERM_ARG="$1" ;;
-        -*)         log_error "ai: unknown flag '$1' (try --agent <name> --grok --codex --shell --list --help)"; exit 2 ;;
+        -*)         log_error "ai: unknown flag '$1' (try --agent <name> --grok --codex --shell --files --list --help)"; exit 2 ;;
         *)          TERM_ARG="$1" ;;
     esac
     shift
@@ -270,6 +272,11 @@ _ai_open_shell() {
     else
         ai_herdr_open "$name" "$path" ""
     fi
+}
+
+_ai_open_files() {
+    local name="$1" path="$2" wsid="$3"
+    ai_herdr_open_files "$name" "$path" "$wsid"
 }
 
 # Build the MERGED candidate set, one `label<TAB>path<TAB>wsid<TAB>status<TAB>tabid`
@@ -397,6 +404,11 @@ _ai_route() {
 
     if (( FORCE_SHELL )); then
         _ai_open_shell "$name" "$path" "$wsid"
+        return $?
+    fi
+
+    if (( FORCE_FILES )); then
+        _ai_open_files "$name" "$path" "$wsid"
         return $?
     fi
 
