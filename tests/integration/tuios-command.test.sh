@@ -66,6 +66,38 @@ assert_eq "$out" 'argc=0' "setup without host passes no empty argument"
 out="$(bash "$ROOT/bin/mesh" tuios setup --host testbox 2>&1)"
 assert_contains "$out" 'argc=2' "setup forwards explicit host option"
 assert_contains "$out" 'arg=testbox' "setup forwards host alias"
+out="$(bash "$ROOT/bin/mesh" tuios setup --host testbox --confirm-access-email user@example.com 2>&1)"
+rc=$?
+assert_eq "$rc" 0 "setup accepts exact Access email confirmation"
+assert_contains "$out" 'argc=4' "setup forwards confirmation to publisher"
+assert_contains "$out" 'arg=user@example.com' "publisher receives confirmed email"
+
+mkdir -p "$SANDBOX/fakebin"
+cat > "$SANDBOX/fakebin/systemctl" <<'SH'
+#!/bin/sh
+exit 0
+SH
+cat > "$SANDBOX/fakebin/curl" <<'SH'
+#!/bin/sh
+if [ "${TUIOS_TEST_ACCESS_STATUS:-302}" = 302 ]; then
+  printf 'HTTP/2 302\r\nlocation: https://team.cloudflareaccess.com/login\r\n\r\n'
+else
+  printf 'HTTP/2 200\r\n\r\n'
+fi
+SH
+chmod +x "$SANDBOX/fakebin/systemctl" "$SANDBOX/fakebin/curl"
+old_path="$PATH"
+export PATH="$SANDBOX/fakebin:$PATH"
+export TUIOS_SERVICE_DRY_RUN=0 TUIOS_TEST_ACCESS_STATUS=302
+out="$(bash "$ROOT/bin/mesh" tuios doctor --host testbox 2>&1)"
+rc=$?
+assert_eq "$rc" 0 "doctor accepts active services with Access redirect"
+assert_contains "$out" 'Access: protected' "doctor reports public Access gate"
+export TUIOS_TEST_ACCESS_STATUS=200
+out="$(bash "$ROOT/bin/mesh" tuios doctor --host testbox 2>&1)"
+rc=$?
+assert_ne "$rc" 0 "doctor rejects public origin with no Access redirect"
+export PATH="$old_path" TUIOS_SERVICE_DRY_RUN=1
 
 cat > "$MESH_TUIOS_PROFILE" <<'JSON'
 {"schema":1,"hosts":{"testbox":{"system_hostname":"fixture-host","public_hostname":"evil;touch /tmp/mesh-tuios-pwn.example.com","access_email":"user@example.com","session":"web","local_port":7681,"remote_port":7685}}}

@@ -60,3 +60,11 @@ tuios_profile_get() {
     file="$(tuios_profile_path)"
     jq -er --arg alias "$alias" --arg field "$field" '.hosts[$alias][$field] // empty' "$file"
 }
+
+tuios_access_redirect_ok() {
+    local hostname="$1" headers status location
+    headers="$(curl -sSI --connect-timeout 8 --max-time 15 "https://$hostname/")" || return 1
+    status="$(printf '%s\n' "$headers" | awk 'toupper($1) ~ /^HTTP\// {code=$2} END {print code}' | tr -d '\r')"
+    location="$(printf '%s\n' "$headers" | awk 'tolower($1)=="location:" {print $2; exit}' | tr -d '\r')"
+    [[ "$status" == 302 && "$location" =~ ^https://[A-Za-z0-9.-]+\.cloudflareaccess\.com/ ]]
+}

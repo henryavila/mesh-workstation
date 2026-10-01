@@ -85,4 +85,21 @@ assert_file_contains "$plist" '<key>KeepAlive</key>' "LaunchAgent restarts autom
 printf '<plist><dict><key>Label</key><string>com.mesh.tuios-web-local</string></dict></plist>\n' > "$plist"
 if check; then fail "Mac check rejects foreign plist"; else pass "Mac check rejects foreign plist"; fi
 
+export TUIOS_TEST_OS=Linux
+export TUIOS_SYSTEMD_DIR="$SANDBOX/tunnel-systemd"
+export TUIOS_CLOUDFLARED_BIN_DIR="$SANDBOX/bin"
+cat > "$TUIOS_CLOUDFLARED_BIN_DIR/cloudflared" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$TUIOS_CLOUDFLARED_BIN_DIR/cloudflared"
+printf 'tunnel: test\n' > "$SANDBOX/tunnel.yml"
+if tuios_service_apply_tunnel testbox "$SANDBOX/tunnel.yml" 00000000-1111-4222-8333-444444444444; then
+    pass "renders a persistent connector service"
+else
+    fail "renders a persistent connector service"
+fi
+tunnel_unit="$TUIOS_SYSTEMD_DIR/tuios-tunnel-testbox.service"
+assert_file_contains "$tunnel_unit" 'tunnel --protocol http2 --no-autoupdate run 00000000-1111-4222-8333-444444444444' "connector uses HTTP/2 with fixed tunnel ID"
+
 summary

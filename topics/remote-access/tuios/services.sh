@@ -89,13 +89,12 @@ _tuios_service_apply() {
         if [[ "$previous" == --port ]]; then port="$arg"; break; fi
         previous="$arg"
     done
-    [[ -n "$port" ]] || return 1
     os="$(_tuios_service_os)"
     case "$os" in
         Linux)
             dir="$(_tuios_service_systemd_dir)"
             path="$dir/$name.service"
-            _tuios_service_new_port_available "$path" "$port" || return 1
+            if [[ -n "$port" ]]; then _tuios_service_new_port_available "$path" "$port" || return 1; fi
             mkdir -p "$dir"
             tmp="$(mktemp "$dir/.${name}.XXXXXX")" || return 1
             _tuios_service_render_systemd "$name" "$bin" "$@" > "$tmp"
@@ -126,7 +125,7 @@ _tuios_service_apply() {
             dir="$(_tuios_service_launchd_dir)"
             label="com.mesh.$name"
             path="$dir/$label.plist"
-            _tuios_service_new_port_available "$path" "$port" || return 1
+            if [[ -n "$port" ]]; then _tuios_service_new_port_available "$path" "$port" || return 1; fi
             mkdir -p "$dir"
             tmp="$(mktemp "$dir/.${name}.XXXXXX")" || return 1
             _tuios_service_render_launchd "$name" "$bin" "$@" > "$tmp"
@@ -182,6 +181,16 @@ tuios_service_apply_remote() {
             ;;
         *) printf 'tuios: unknown remote auth mode %s\n' "$mode" >&2; return 1 ;;
     esac
+}
+
+tuios_service_apply_tunnel() {
+    local alias="$1" config="$2" tunnel_id="$3" bin
+    [[ "$alias" =~ ^[a-z][a-z0-9_-]*$ ]] || return 1
+    [[ "$tunnel_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] || return 1
+    [[ -r "$config" ]] || return 1
+    bin="${TUIOS_CLOUDFLARED_BIN_DIR:-$HOME/.local/bin}/cloudflared"
+    [[ -x "$bin" ]] || return 1
+    _tuios_service_apply "tuios-tunnel-$alias" "$bin" --config "$config" tunnel --protocol http2 --no-autoupdate run "$tunnel_id"
 }
 
 check() {
