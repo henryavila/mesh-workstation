@@ -64,20 +64,20 @@ export YAZI_CD_TARGET="$SANDBOX/newdir"
 # Bare shell: --cwd-file and cd.
 unset HERDR_ENV TUIOS_SESSION
 : > "$YAZI_ARGV_LOG"
-pushd "$SANDBOX" >/dev/null
+pushd "$SANDBOX" >/dev/null || exit
 y
 got_cwd="$PWD"
-popd >/dev/null
+popd >/dev/null || exit
 assert_contains "$(cat "$YAZI_ARGV_LOG")" "--cwd-file=" "bare y passes --cwd-file"
 assert_eq "$got_cwd" "$SANDBOX/newdir" "bare y cds to cwd-file path"
 
 # HERDR_ENV: passthrough, no cwd-file, no cd.
 export HERDR_ENV=1
 : > "$YAZI_ARGV_LOG"
-pushd "$SANDBOX" >/dev/null
+pushd "$SANDBOX" >/dev/null || exit
 y
 got_cwd="$PWD"
-popd >/dev/null
+popd >/dev/null || exit
 assert_not_contains "$(cat "$YAZI_ARGV_LOG")" "--cwd-file=" "HERDR_ENV y omits --cwd-file"
 assert_eq "$got_cwd" "$SANDBOX" "HERDR_ENV y does not cd"
 unset HERDR_ENV
