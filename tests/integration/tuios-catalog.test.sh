@@ -5,6 +5,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 # shellcheck source=../lib/assert.sh
+# shellcheck disable=SC1091
 source "$HERE/../lib/assert.sh"
 
 MANIFEST="$ROOT/topics/remote-access/manifest.yaml"
@@ -37,6 +38,17 @@ idx="$(bundle_index tuios-cloudflare)" || idx=""
 if [[ -n "$idx" ]]; then
     dep="BUNDLE_${idx}_REQUIRES_BUNDLES_0"
     assert_eq "${!dep:-}" "remote-access/tuios" "publication requires local TUIOS"
+fi
+
+idx="$(bundle_index tuios)" || idx=""
+if [[ -n "$idx" ]]; then
+    systemd_item=""
+    count_var="BUNDLE_${idx}_ITEM_COUNT"
+    for ((j=0; j<${!count_var:-0}; j++)); do
+        item_var="BUNDLE_${idx}_ITEM_${j}_NAME"
+        if [[ "${!item_var:-}" == systemd-wsl ]]; then systemd_item="$j"; break; fi
+    done
+    assert_ne "$systemd_item" "" "TUIOS WSL bundle prepares persistent systemd"
 fi
 
 if [[ -f "$PROFILE" ]]; then

@@ -104,6 +104,10 @@ bundles:
     default_selected: false
     icon_name: terminal
     items:
+      - name: systemd-wsl
+        type: custom
+        script: ./enable-systemd-wsl.sh
+        platforms: [wsl]
       - name: tuios-binaries
         type: custom
         script: ./tuios/install-binaries.sh
