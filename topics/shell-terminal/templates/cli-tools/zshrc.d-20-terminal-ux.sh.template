@@ -258,3 +258,21 @@ command -v procs >/dev/null 2>&1 && alias ps='procs'
 # tealdeer / tldr — cheatsheet pages. Intentionally NOT aliased as
 # `man` — full manual pages remain valuable for serious diving.
 # Usage: tldr tar / tldr git-rebase
+
+# y — cwd-on-quit only in a bare shell. Inside a multiplexer, passthrough.
+# HERDR_ENV=1 is set in herdr panes; TUIOS_SESSION is set inside TUIOS.
+y() {
+  if [[ -n "${HERDR_ENV:-}" || -n "${TUIOS_SESSION:-}" ]]; then
+    command yazi "$@"
+    return $?
+  fi
+  local tmp cwd
+  tmp="$(mktemp -t "yazi-cwd.XXXXXX")" || return 1
+  command yazi "$@" --cwd-file="$tmp"
+  local rc=$?
+  if cwd="$(command cat -- "$tmp" 2>/dev/null)" && [[ -n "$cwd" && "$cwd" != "$PWD" ]]; then
+    builtin cd -- "$cwd"
+  fi
+  rm -f -- "$tmp"
+  return "$rc"
+}

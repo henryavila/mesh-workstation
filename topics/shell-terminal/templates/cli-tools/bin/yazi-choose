@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# yazi-choose — print selected path(s) from Yazi --chooser-file.
+set -euo pipefail
+out="$(mktemp "${TMPDIR:-/tmp}/yazi-choose.XXXXXX")"
+cleanup() { rm -f "$out"; }
+trap cleanup EXIT
+command yazi --chooser-file="$out" "$@"
+[[ -s "$out" ]] || exit 1
+cat "$out"
