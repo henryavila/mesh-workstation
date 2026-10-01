@@ -704,6 +704,15 @@ bash "$HERE/scripts/lib/install-engine.sh" "${engine_args[@]}" 2>&1 | tee -a "$L
 engine_rc="${PIPESTATUS[0]}"
 set -e
 
+# Secrets unlock belongs HERE, after the engine tee, while /dev/tty is the
+# controlling terminal again. personal/apply runs `mesh secret deploy` early
+# (order 30) under the tee pipe; a prompt there is easy to miss, and
+# NON_INTERACTIVE / a missing TTY skips it entirely. Ask once at the end.
+# A skipped/headless lock is a follow-up, not a setup failure.
+if [[ "$DRY_RUN" != "1" && "${MESH_NO_MESH:-0}" != "1" && "$ADOPT_MODE" != "1" ]]; then
+    "$HERE/bin/mesh" secret offer-unlock || true
+fi
+
 banner "summary"
 render_followup_summary
 

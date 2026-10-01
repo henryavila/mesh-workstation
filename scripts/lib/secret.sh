@@ -307,6 +307,73 @@ secret_deploy() {
     return 0
 }
 
+# Offer to unlock replicated secrets on this machine.
+#
+# Called at the END of setup.sh, after the engine has been piped through tee:
+# personal/apply runs `secret deploy` early (topic order 30) under that pipe,
+# so a prompt there is easy to miss, and NON_INTERACTIVE / a missing TTY skips
+# it entirely. Asking here uses the controlling terminal again.
+#
+# rc0: nothing to unlock, or unlock+deploy succeeded.
+# rc1: still locked (headless → critical follow-up; interactive skip → same).
+secret_offer_unlock() {
+    if [ ! -d "$SECRETS_DIR" ]; then
+        return 0
+    fi
+    if [ ! -f "$MANIFEST" ] && [ ! -f "$ENV_SRC" ]; then
+        return 0
+    fi
+
+    # Ciphertext manifest still lets _secret_locked_count see secrets.env.
+    _manifest_load || true
+    local locked
+    locked="$(_secret_locked_count)"
+    if [ -f "$MANIFEST" ] && _is_ciphertext "$MANIFEST"; then
+        locked=$((locked + 1))
+    fi
+    [ "$locked" -gt 0 ] || return 0
+
+    if [ "${NON_INTERACTIVE:-0}" != "1" ] && [ -e /dev/tty ]; then
+        warn "This machine has $locked replicated secret(s) but the identity repo is LOCKED here."
+        info "Paste the git-crypt key (from your password manager) to unlock them now."
+        if secret_unlock; then
+            secret_deploy || return 1
+            _secret_retry_moshi_pair
+            return 0
+        fi
+        warn "skipped — secrets stay locked on this machine."
+    fi
+
+    followup critical "Replicated secrets are LOCKED on this machine. Run:
+    mesh secret unlock
+    mesh secret deploy"
+    warn "──────────────────────────────────────────────────────────────"
+    warn " $locked secret(s) NOT deployed — the repo is LOCKED on this machine."
+    warn " Configure replication with your git-crypt key:"
+    warn "     mesh secret unlock        # paste the base64 key, then:"
+    warn "     mesh secret deploy"
+    warn "──────────────────────────────────────────────────────────────"
+    return 1
+}
+
+# After a late unlock, moshi-hook may already be running unpaired (it installs
+# after personal/apply). Best-effort pair from the just-deployed env-token store.
+_secret_retry_moshi_pair() {
+    [ -r "$ENV_DST" ] || return 0
+    set -a
+    # shellcheck disable=SC1090
+    . "$ENV_DST"
+    set +a
+    command -v moshi-hook >/dev/null 2>&1 || return 0
+    [ -n "${MOSHI_PAIRING_TOKEN:-}" ] || return 0
+    if moshi-hook status 2>/dev/null | grep -qi "paired\|connected"; then
+        return 0
+    fi
+    info "pairing moshi-hook with token from secrets.env"
+    moshi-hook pair --token "$MOSHI_PAIRING_TOKEN" \
+        || followup manual "moshi-hook pairing failed. From the Moshi app (Settings → Integrations): moshi-hook pair --token <TOKEN>"
+}
+
 # Deploy the encrypted env-token store to the runtime path the install engine
 # sources, so env-token secrets actually reach the tools that read them.
 _deploy_env_store() {
@@ -582,6 +649,9 @@ Usage: mesh secret <verb>
   list                 Show integrations + per-machine + replication status.
   doctor               Health / drift checks.
   deploy               Place all enabled Tier-2 files; run pending logins.
+  offer-unlock         If secrets exist but are still locked here, ask for the
+                       git-crypt key (used at the end of setup.sh). Headless
+                       runs record a critical follow-up instead of prompting.
   push                 Push pending commits (after a failed auto-push).
 
 Saved means replicated: add/set/rm commit AND push (and tell you where).
@@ -600,6 +670,7 @@ case "$verb" in
     list)    secret_list "$@" ;;
     doctor)  secret_doctor "$@" ;;
     deploy)  secret_deploy "$@" ;;
+    offer-unlock) secret_offer_unlock "$@" ;;
     push)    secret_push "$@" ;;
     guard)   secret_guard "$@" ;;
     export-key) secret_export_key "$@" ;;
