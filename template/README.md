@@ -34,6 +34,7 @@ structure.
 | `ssh/authorized_keys.example` | secrets | managed_block markers (0600) |
 | `ssh/peers.list.example` | identity config | SSH aliases to verify after enrollment |
 | `iterm2/font.json.example` | identity config | preferred terminal font size and ligatures |
+| `config/tuios-hosts.json.example` | identity config | empty per-host browser terminal profile; no domain, email or credential |
 | `.ai/memory/MEMORY.md.example` | agent memory index | empty index template |
 | `.ai/memory/PROJECT_STATUS.md.example` | rollup dashboard | §1-§5 skeleton |
 
