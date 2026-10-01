@@ -17,11 +17,15 @@ usage() {
     cat <<'EOF'
 Usage: mesh tuios <setup|status|doctor|disable> [--host ALIAS]
        mesh tuios setup --host ALIAS --confirm-access-email EMAIL --access-aud AUD
+       mesh tuios hosts <sync|status|doctor>
+       mesh tuios attach NAME [SESSION]
 
   setup   Configure a private host profile and protected Cloudflare publication
   status  Show this host's browser URL, shared session and service state
   doctor  Check local services and Access redirect without changing state
   disable Stop Mesh-managed public services; preserve DNS and credentials
+  hosts   Manage TUIOS links to Mesh peers over existing SSH aliases
+  attach  Attach or create a session on another Mesh machine
 EOF
 }
 
@@ -34,7 +38,12 @@ launch_agent_running() {
 
 verb="${1:---help}"
 shift 2>/dev/null || true
-case "$verb" in -h|--help|help) usage; exit 0 ;; setup|status|doctor|disable) ;; *) usage >&2; die "unknown verb: $verb" ;; esac
+case "$verb" in
+    -h|--help|help) usage; exit 0 ;;
+    hosts|attach) exec bash "$RUNNER_ROOT/topics/remote-access/tuios/hosts.sh" "$verb" "$@" ;;
+    setup|status|doctor|disable) ;;
+    *) usage >&2; die "unknown verb: $verb" ;;
+esac
 
 host="" confirm_email="" access_aud=""
 while [[ $# -gt 0 ]]; do

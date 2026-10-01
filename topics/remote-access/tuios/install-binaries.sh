@@ -158,7 +158,13 @@ _tuios_install_tag() (
 install() {
     local tag
     tag="$(_tuios_tag)" || return 1
-    _tuios_install_tag "$tag"
+    _tuios_install_tag "$tag" || return 1
+    local roster helper
+    roster="${MESH_TUIOS_PEERS:-${MESH_IDENTITY_DIR:-$HOME/mesh-identity}/config/tuios-peers.json}"
+    helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/hosts.sh"
+    if [[ -r "$roster" && -f "$helper" ]]; then
+        bash "$helper" sync || printf 'tuios: peer sync needs attention; run mesh tuios hosts doctor\n' >&2
+    fi
 }
 
 repair() { install; }

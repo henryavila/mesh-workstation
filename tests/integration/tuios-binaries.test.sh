@@ -16,6 +16,8 @@ fi
 
 SANDBOX="$(mktemp -d -t mesh-tuios-binaries.XXXXXX)"
 trap 'rm -rf "$SANDBOX"' EXIT
+export HOME="$SANDBOX/home"
+unset MESH_IDENTITY_DIR MESH_TUIOS_PEERS
 export TUIOS_BIN_DIR="$SANDBOX/home/.local/bin"
 export TUIOS_INSTALL_ROOT="$SANDBOX/home/.local/share/mesh/tuios"
 export TUIOS_RELEASE_BASE="file://$SANDBOX/releases"

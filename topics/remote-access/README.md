@@ -21,6 +21,40 @@ release** after checking both SHA-256 hashes. It starts a local web server on
 Mesh does not automatically replace a running TUIOS pair during the daily
 upgrade pass: the daemon owns live shells, and a client update can be deferred
 until the operator chooses a maintenance window.
+
+## TUIOS sessions on Mesh peers
+
+TUIOS can show sessions from another Mesh machine in the local rail. It uses
+that machine's existing OpenSSH alias and key; no TUIOS SSH listener or extra
+port is needed. Each identity may declare friendly peer names in private
+`config/tuios-peers.json` (the public template is empty). For example, map
+`laptop` to the SSH alias `laptop-tailnet`, then use:
+
+```sh
+mesh tuios hosts sync            # reconcile only Mesh-owned TUIOS host entries
+mesh tuios hosts status          # configured peers and current link states
+mesh tuios hosts doctor          # test each peer's SSH/TUIOS link
+mesh tuios attach laptop         # attach the peer's most recent session
+mesh tuios attach laptop project # attach or create a named session
+```
+
+The optional TUIOS bundle runs the sync on first install; an identity update
+also runs it when TUIOS is installed. An unchanged roster makes no SSH call or
+TUIOS config write. Manual TUIOS hosts remain intact. The first sync refuses a
+friendly name already configured outside Mesh, so rename or remove that entry
+explicitly before adopting it. If an owned name is redirected manually, sync
+stops and leaves it intact for review. The current machine is excluded. A sleeping or
+offline peer remains listed and TUIOS reconnects when it returns.
+
+TUIOS uses SSH `BatchMode`: accept each peer's host key in a normal SSH session
+and ensure key-based login works before expecting its TUIOS link to become
+`up`. Set `session` in a roster entry only when that peer has a preferred
+shared session, such as the browser's `web`. Without it, `attach` selects the
+peer's most recent session. A sync launched from inside a TUIOS pane may need
+`tuios config apply`
+from a separate terminal before a newly added link opens. The browser URL
+below remains available on networks where Tailscale or SSH cannot connect.
+
 The `tuios-cloudflare` bundle installs `cloudflared` but does **not** publish a
 shell during setup. Each published machine gets its own hostname and tunnel;
 there is no central host dependency.
@@ -83,7 +117,7 @@ layout and opens fresh shells; it does not preserve running processes.
 The browser terminal is a shell as the local service user. Keep the origin on
 loopback, the connector JWT gate enabled and the exact-email Access policy
 active. The Cloudflare hostname is only a codename, not an access control.
-The current crc pilot predates connector JWT enforcement; `mesh tuios status`
+An older manually configured pilot may predate connector JWT enforcement; `mesh tuios status`
 can inspect it, while `doctor` reports the missing gate without changing its
 unmanaged services. Validate new macOS and WSL hosts manually before relying
 on them for remote work.
