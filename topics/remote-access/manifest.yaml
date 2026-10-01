@@ -96,3 +96,32 @@ bundles:
         script: ./mac/code-server.sh
         platforms: [mac]
         uninstall_tier: 2
+
+  - name: tuios
+    label: "TUIOS + browser terminal"
+    desc: "Persistent terminal sessions shared by CLI and local browser"
+    platforms: [mac, wsl]
+    default_selected: false
+    icon_name: terminal
+    items:
+      - name: tuios-binaries
+        type: custom
+        script: ./tuios/install-binaries.sh
+        autoupdate: true
+        restart_service: tuios-local-web
+      - name: tuios-local-web
+        type: custom
+        script: ./tuios/services.sh
+
+  - name: tuios-cloudflare
+    label: "TUIOS remote browser access"
+    desc: "Install cloudflared; publish only after configuring Cloudflare Access"
+    platforms: [mac, wsl]
+    default_selected: false
+    requires_bundles:
+      - remote-access/tuios
+    icon_name: globe
+    items:
+      - name: cloudflared
+        type: custom
+        script: ./tuios/install-cloudflared.sh
