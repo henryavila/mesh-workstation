@@ -6,6 +6,122 @@ Select bundles in Blink / `selections.list` or pass `--bundle` (e.g.
 `remote-access/code-server` are tagged `membership: mesh` — under `--no-mesh`
 they are **omitted from the catalog**.
 
+`remote-access/tuios` and `remote-access/tuios-cloudflare` are also opt-in.
+TUIOS does not require Tailscale or SSH on the phone.
+On an existing machine, add these bundles in the interactive Mesh menu while
+keeping its other selections. `setup.sh --bundle` replaces the entire saved
+selection list and may uninstall bundles omitted from that command.
+
+## TUIOS browser terminal
+
+The `tuios` bundle installs `tuios` and `tuios-web` from the **same official
+release** after checking both SHA-256 hashes. It starts a local web server on
+`127.0.0.1:7681` in session `web`. Work locally through that page or run
+`tuios attach web`; closing either client leaves the daemon session running.
+Mesh does not automatically replace a running TUIOS pair during the daily
+upgrade pass: the daemon owns live shells, and a client update can be deferred
+until the operator chooses a maintenance window.
+
+## TUIOS sessions on Mesh peers
+
+TUIOS can show sessions from another Mesh machine in the local rail. It uses
+that machine's existing OpenSSH alias and key; no TUIOS SSH listener or extra
+port is needed. Each identity may declare friendly peer names in private
+`config/tuios-peers.json` (the public template is empty). For example, map
+`laptop` to the SSH alias `laptop-tailnet`, then use:
+
+```sh
+mesh tuios hosts sync            # reconcile only Mesh-owned TUIOS host entries
+mesh tuios hosts status          # configured peers and current link states
+mesh tuios hosts doctor          # test each peer's SSH/TUIOS link
+mesh tuios attach laptop         # attach the peer's most recent session
+mesh tuios attach laptop project # attach or create a named session
+```
+
+The optional TUIOS bundle runs the sync on first install; an identity update
+also runs it when TUIOS is installed. An unchanged roster makes no SSH call or
+TUIOS config write. Manual TUIOS hosts remain intact. The first sync refuses a
+friendly name already configured outside Mesh, so rename or remove that entry
+explicitly before adopting it. If an owned name is redirected manually, sync
+stops and leaves it intact for review. The current machine is excluded. A sleeping or
+offline peer remains listed and TUIOS reconnects when it returns.
+
+TUIOS uses SSH `BatchMode`: accept each peer's host key in a normal SSH session
+and ensure key-based login works before expecting its TUIOS link to become
+`up`. Set `session` in a roster entry only when that peer has a preferred
+shared session, such as the browser's `web`. Without it, `attach` selects the
+peer's most recent session. A sync launched from inside a TUIOS pane may need
+`tuios config apply`
+from a separate terminal before a newly added link opens. The browser URL
+below remains available on networks where Tailscale or SSH cannot connect.
+
+The `tuios-cloudflare` bundle installs `cloudflared` but does **not** publish a
+shell during setup. Each published machine gets its own hostname and tunnel;
+there is no central host dependency.
+
+On a new identity, `mesh init --create-identity` creates an empty
+`config/tuios-hosts.json`. The public template contains no real domain, email
+or machine name. After selecting both bundles, configure this computer:
+
+```sh
+mesh tuios setup --host laptop
+```
+
+The command asks for a codename hostname (for example,
+`quiet-otter.example.com`) and the **exact** allowed Access email. It writes
+those non-secret values to the private identity profile. The command
+`cloudflared tunnel login` may open an authorization page in your browser;
+choose the DNS zone.
+The command then creates or reuses a named tunnel, its host-local credential,
+DNS route and managed connector service. The remote origin starts with a
+strong password in a file readable only by you. The Cloudflare account
+certificate and tunnel JSON remain under `~/.cloudflared/`; do not commit them.
+
+In Cloudflare Zero Trust, add a **self-hosted web application** for that exact
+hostname. Its Allow policy must include only your email (not Everyone or an
+entire domain). Choose an available identity provider, such as One-time PIN,
+and leave browser-rendered SSH/RDP/VNC disabled: `tuios-web` is already the
+browser application. Copy its 64-character **Application Audience (AUD) tag**
+from the Access application overview. It identifies the app but is not a
+credential. After saving the policy, complete the handoff:
+
+```sh
+mesh tuios setup --host laptop --confirm-access-email you@example.com --access-aud AUD_TAG
+mesh tuios doctor --host laptop
+```
+
+The first command checks that anonymous HTTPS is redirected to Cloudflare
+Access, configures the connector to require a valid JWT for that application's
+AUD, validates and restarts the connector, and only then removes the origin
+password. Re-running setup is safe: it does not rotate a healthy tunnel or
+rewrite unrelated DNS. If Access or the connector JWT gate disappears,
+re-running setup restores the password gate. `mesh tuios status` reports the
+configured URL and runtime health without revealing credentials. Run
+`mesh tuios disable --host laptop` to stop only Mesh-managed public services
+while preserving DNS, the Access app, private profile and tunnel credential.
+
+On the phone, open the URL through HTTPS. Behind Cloudflare Tunnel, choose
+**WebSocket** in the TUIOS page's settings (gear) once. TUIOS stores that
+browser preference per hostname; its Auto/WebTransport path may remain in
+"Connecting…" through an HTTPS reverse proxy. The current TUIOS release has
+no server flag to set WebSocket for every new browser.
+
+WSL uses persistent systemd user units and enables systemd in `/etc/wsl.conf`.
+On a fresh WSL where that change was just written, run `wsl --shutdown` from
+Windows, reopen the distro and rerun Mesh before starting the web service.
+Linger keeps user units alive while the distro is running; Windows does not
+start the distro automatically at boot. macOS uses LaunchAgents, which start
+when the user logs in. A TUIOS daemon restart or host reboot restores the
+layout and opens fresh shells; it does not preserve running processes.
+
+The browser terminal is a shell as the local service user. Keep the origin on
+loopback, the connector JWT gate enabled and the exact-email Access policy
+active. The Cloudflare hostname is only a codename, not an access control.
+An older manually configured pilot may predate connector JWT enforcement; `mesh tuios status`
+can inspect it, while `doctor` reports the missing gate without changing its
+unmanaged services. Validate new macOS and WSL hosts manually before relying
+on them for remote work.
+
 **Installs:** `openssh-server` + `mosh` + `tailscale`. Activates sshd, enables systemd on WSL (`/etc/wsl.conf`).
 
 **Legacy NOPASSWD removal** (since v2026-04-22): earlier versions of this topic created `/etc/sudoers.d/10-${USER}-nopasswd` with `NOPASSWD: ALL` as a convenience during bootstrap. That was unnecessary permanent attack surface — the main `setup.sh` now runs `sudo -v` at startup (cache warmup, ~5–15 min), covering the whole bootstrap duration with a single prompt. Forks that already had the file: this topic removes it automatically on the next run.

@@ -1,0 +1,2 @@
+# SSH host aliases to verify after enrollment, one per line.
+# Add only aliases you configured in ~/.ssh/config for your own machines.

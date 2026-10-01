@@ -19,23 +19,66 @@ check() {
     fi
 }
 
-check ssh
-check mosh
+selections_file="${MESH_SELECTIONS_FILE:-$HOME/.config/mesh/selections.list}"
+selected_or_legacy() {
+    [[ ! -r "$selections_file" ]] || grep -qFx "$1" "$selections_file"
+}
+if selected_or_legacy remote-access/ssh; then check ssh; fi
+if selected_or_legacy remote-access/mosh; then check mosh; fi
+
+if [[ -r "$selections_file" ]] && grep -qE '^remote-access/tuios(-cloudflare)?$' "$selections_file"; then
+    tuios_bin="${TUIOS_BIN_DIR:-$HOME/.local/bin}/tuios"
+    tuios_web_bin="${TUIOS_BIN_DIR:-$HOME/.local/bin}/tuios-web"
+    if [[ ! -x "$tuios_bin" ]]; then tuios_bin="$(command -v tuios 2>/dev/null || true)"; fi
+    if [[ ! -x "$tuios_web_bin" ]]; then tuios_web_bin="$(command -v tuios-web 2>/dev/null || true)"; fi
+    if [[ -n "$tuios_bin" && -x "$tuios_bin" ]]; then
+        echo "  ✓ tuios"
+    else
+        echo "  ✗ tuios MISSING"
+        fail_count=$((fail_count + 1))
+    fi
+    if [[ -n "$tuios_web_bin" && -x "$tuios_web_bin" ]]; then
+        echo "  ✓ tuios-web"
+    else
+        echo "  ✗ tuios-web MISSING"
+        fail_count=$((fail_count + 1))
+    fi
+    if [[ -n "$tuios_bin" && -x "$tuios_bin" && -n "$tuios_web_bin" && -x "$tuios_web_bin" ]]; then
+        tuios_version="$("$tuios_bin" --version 2>/dev/null | awk '$2 == "version" {print $3; exit}' || true)"
+        tuios_web_version="$("$tuios_web_bin" --version 2>/dev/null | awk '$2 == "version" {print $3; exit}' || true)"
+        if [[ -n "$tuios_version" && "$tuios_version" == "$tuios_web_version" ]]; then
+            echo "  ✓ tuios + tuios-web version $tuios_version"
+        else
+            echo "  ✗ tuios version mismatch (CLI=${tuios_version:-?}, web=${tuios_web_version:-?})"
+            fail_count=$((fail_count + 1))
+        fi
+    fi
+fi
+
+if [[ -r "$selections_file" ]] && grep -qFx 'remote-access/tuios-cloudflare' "$selections_file"; then
+    if [[ -x "$HOME/.local/bin/cloudflared" ]]; then
+        echo "  ✓ cloudflared"
+    else
+        check cloudflared
+    fi
+fi
 
 # Tailscale: on Mac the .app binary lives inside /Applications and the
 # CLI isn't added to PATH by default. Accept either presence as installed.
-if command -v tailscale >/dev/null 2>&1; then
-    echo "  ✓ tailscale (CLI in PATH)"
-elif [[ "$(uname -s)" == "Darwin" ]] && [[ -d "/Applications/Tailscale.app" ]]; then
-    echo "  ✓ Tailscale.app (add '/Applications/Tailscale.app/Contents/MacOS' to PATH to get CLI)"
-else
-    echo "  ✗ tailscale MISSING"
-    fail_count=$((fail_count + 1))
+if selected_or_legacy remote-access/tailscale; then
+    if command -v tailscale >/dev/null 2>&1; then
+        echo "  ✓ tailscale (CLI in PATH)"
+    elif [[ "$(uname -s)" == "Darwin" ]] && [[ -d "/Applications/Tailscale.app" ]]; then
+        echo "  ✓ Tailscale.app (add '/Applications/Tailscale.app/Contents/MacOS' to PATH to get CLI)"
+    else
+        echo "  ✗ tailscale MISSING"
+        fail_count=$((fail_count + 1))
+    fi
 fi
 
 # Tailscale MTU drop-in (WSL/Linux only)
 # Presence check — we don't fail if absent (topic may have been run before this fix existed).
-if [[ "$(uname -s)" == "Linux" ]]; then
+if selected_or_legacy remote-access/tailscale && [[ "$(uname -s)" == "Linux" ]]; then
     mtu_dropin="/etc/systemd/system/tailscaled.service.d/mtu.conf"
     if [[ -f "$mtu_dropin" ]]; then
         if grep -q 'mtu 1200' "$mtu_dropin" 2>/dev/null; then

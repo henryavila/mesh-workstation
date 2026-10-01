@@ -49,7 +49,10 @@ export async function helpMain(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  if (!process.stdin.isTTY) process.exit(1);
+  if (!process.stdin.isTTY) {
+    process.stderr.write('mesh help: needs an interactive terminal (no TTY on stdin).\n');
+    process.exit(1);
+  }
 
   let commands: HelpCommand[] = [];
   try {

@@ -64,6 +64,15 @@ export const MESH_HELP_COMMANDS: HelpCommand[] = [
     ],
   },
   {
+    id: 'help',
+    usage: 'mesh help [command] [--plain]',
+    summary: 'Browse Mesh command help',
+    details: [
+      'Opens the interactive command reference, optionally focused on one command.',
+      '--plain prints compact help when a terminal UI is unavailable.',
+    ],
+  },
+  {
     id: 'doctor',
     usage: 'mesh doctor [--fix]',
     summary: 'Detect or repair drift',
@@ -91,6 +100,15 @@ export const MESH_HELP_COMMANDS: HelpCommand[] = [
     ],
   },
   {
+    id: 'reinstall',
+    usage: 'mesh reinstall shell [--dry-run]',
+    summary: 'Reapply the shell layer',
+    details: [
+      'Reapplies managed shell, terminal and git files on an existing machine.',
+      '--dry-run shows the plan without invoking the engine.',
+    ],
+  },
+  {
     id: 'run',
     usage: 'mesh run [flags] <subcommand>',
     summary: 'Fan out safe mesh commands',
@@ -115,6 +133,16 @@ export const MESH_HELP_COMMANDS: HelpCommand[] = [
     details: [
       'Lists and controls curated services such as database, web, and sync daemons.',
       'Tracks active and enabled as separate states.',
+    ],
+  },
+  {
+    id: 'tuios',
+    usage: 'mesh tuios <setup|status|doctor|disable> [--host ALIAS]',
+    summary: 'Browser terminal access',
+    details: [
+      'Configures one protected browser URL per machine while sharing its local TUIOS session.',
+      'After creating the Access app, confirm its email policy and supply its Application AUD tag.',
+      'Use status and doctor to inspect the host, or disable to stop only Mesh-managed public services.',
     ],
   },
   {
