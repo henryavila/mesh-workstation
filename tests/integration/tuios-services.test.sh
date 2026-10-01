@@ -84,6 +84,39 @@ assert_file_contains "$plist" '<string>127\.0\.0\.1</string>' "LaunchAgent binds
 assert_file_contains "$plist" '<key>KeepAlive</key>' "LaunchAgent restarts automatically"
 printf '<plist><dict><key>Label</key><string>com.mesh.tuios-web-local</string></dict></plist>\n' > "$plist"
 if check; then fail "Mac check rejects foreign plist"; else pass "Mac check rejects foreign plist"; fi
+rm -f "$plist"
+install
+mkdir -p "$SANDBOX/launchctl-bin"
+cat > "$SANDBOX/launchctl-bin/launchctl" <<'SH'
+#!/bin/sh
+printf 'state = %s\n' "${TUIOS_TEST_LAUNCH_STATE:-waiting}"
+SH
+chmod +x "$SANDBOX/launchctl-bin/launchctl"
+old_path="$PATH"
+export PATH="$SANDBOX/launchctl-bin:$PATH"
+export TUIOS_SERVICE_DRY_RUN=0 TUIOS_TEST_LAUNCH_STATE=waiting
+if check; then fail "Mac check rejects loaded but stopped LaunchAgent"; else pass "Mac check rejects loaded but stopped LaunchAgent"; fi
+export TUIOS_TEST_LAUNCH_STATE=running
+if check; then pass "Mac check accepts running LaunchAgent"; else fail "Mac check accepts running LaunchAgent"; fi
+export PATH="$old_path" TUIOS_SERVICE_DRY_RUN=1
+
+mkdir -p "$SANDBOX/linger-bin"
+export TUIOS_LINGER_TEST_MARKER="$SANDBOX/linger-enabled"
+cat > "$SANDBOX/linger-bin/loginctl" <<'SH'
+#!/bin/sh
+if [ -e "$TUIOS_LINGER_TEST_MARKER" ]; then printf 'Linger=yes\n'; else printf 'Linger=no\n'; fi
+SH
+cat > "$SANDBOX/linger-bin/sudo" <<'SH'
+#!/bin/sh
+if [ "$1 $2" = 'loginctl enable-linger' ]; then touch "$TUIOS_LINGER_TEST_MARKER"; exit 0; fi
+exit 1
+SH
+chmod +x "$SANDBOX/linger-bin/loginctl" "$SANDBOX/linger-bin/sudo"
+old_path="$PATH"
+export PATH="$SANDBOX/linger-bin:$PATH"
+if _tuios_service_ensure_linger; then pass "WSL enables user-service linger"; else fail "WSL enables user-service linger"; fi
+assert_file_exists "$TUIOS_LINGER_TEST_MARKER" "linger enable was requested"
+export PATH="$old_path"
 
 export TUIOS_TEST_OS=Linux
 export TUIOS_SYSTEMD_DIR="$SANDBOX/tunnel-systemd"

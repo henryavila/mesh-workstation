@@ -123,4 +123,22 @@ assert_eq "$(jq -r '.hosts.newbox.public_hostname' "$MESH_TUIOS_PROFILE" 2>/dev/
 assert_eq "$(jq -r '.hosts.newbox.tunnel_id' "$MESH_TUIOS_PROFILE" 2>/dev/null)" 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' "profile receives tunnel ID without credential"
 ASSERT_MSG="private profile contains no account or tunnel credential" assert_false "grep -qE 'apiToken|TunnelSecret|cert.pem' '$MESH_TUIOS_PROFILE'"
 
+out="$(bash "$PUBLISH" --host newbox --disable 2>&1)"
+rc=$?
+assert_eq "$rc" 0 "disable stops only Mesh-managed publication services"
+if [[ ! -e "$TUIOS_SYSTEMD_DIR/tuios-web-remote.service" && ! -e "$TUIOS_SYSTEMD_DIR/tuios-tunnel-newbox.service" ]]; then
+    pass "remote and connector units are removed"
+else
+    fail "remote and connector units are removed"
+fi
+assert_file_exists "$MESH_TUIOS_PROFILE" "disable preserves private profile"
+assert_file_exists "$TUIOS_CLOUDFLARED_DIR/mesh-tuios-newbox.route" "disable preserves DNS route metadata"
+
+printf '[Service]\nExecStart=/usr/bin/other\n' > "$TUIOS_SYSTEMD_DIR/tuios-web-remote.service"
+out="$(bash "$PUBLISH" --host newbox --disable 2>&1)"
+rc=$?
+assert_ne "$rc" 0 "disable refuses to claim success while an unmanaged origin exists"
+assert_contains "$out" 'unmanaged' "disable identifies foreign origin"
+assert_file_contains "$TUIOS_SYSTEMD_DIR/tuios-web-remote.service" 'ExecStart=/usr/bin/other' "unmanaged origin remains untouched"
+
 summary

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Install the cloudflared connector from an official release asset + API digest.
 
+_tuios_cf_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=services.sh
+# shellcheck disable=SC1091
+. "$_tuios_cf_here/services.sh"
+
 _tuios_cf_bin_dir() { printf '%s' "${TUIOS_CLOUDFLARED_BIN_DIR:-$HOME/.local/bin}"; }
 _tuios_cf_state_dir() { printf '%s' "${TUIOS_CLOUDFLARED_STATE_DIR:-$HOME/.local/state/mesh/tuios-cloudflared}"; }
 
@@ -40,7 +45,7 @@ _tuios_cf_sha256() {
     fi
 }
 
-install() (
+install() { (
     set -euo pipefail
     local dir state stage asset count url digest want got version dest temp_file
     dir="$(_tuios_cf_bin_dir)"
@@ -88,12 +93,13 @@ install() (
     mv -f "$temp_file" "$dest"
     _tuios_cf_sha256 "$dest" > "$state/managed-sha256"
     verify
-)
+); }
 
 repair() { install; }
 
 uninstall() {
     local dir state dest expected current temp_file
+    tuios_service_disable_public || return 1
     dir="$(_tuios_cf_bin_dir)"
     state="$(_tuios_cf_state_dir)"
     dest="$dir/cloudflared"

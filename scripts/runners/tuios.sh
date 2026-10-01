@@ -3,27 +3,35 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-: "${MESH_WORKSTATION_DIR:=$(cd "$HERE/../.." && pwd)}"
+RUNNER_ROOT="$(cd "$HERE/../.." && pwd)"
+MESH_WORKSTATION_DIR="$RUNNER_ROOT"
+export MESH_WORKSTATION_DIR
 # shellcheck source=/dev/null
-. "$MESH_WORKSTATION_DIR/scripts/lib/env.sh"
+. "$RUNNER_ROOT/scripts/lib/env.sh"
 # shellcheck source=/dev/null
-. "$MESH_WORKSTATION_DIR/topics/remote-access/tuios/profile.sh"
+. "$RUNNER_ROOT/topics/remote-access/tuios/profile.sh"
 
 usage() {
     cat <<'EOF'
-Usage: mesh tuios <setup|status|doctor> [--host ALIAS]
+Usage: mesh tuios <setup|status|doctor|disable> [--host ALIAS]
 
   setup   Configure a private host profile and protected Cloudflare publication
   status  Show this host's browser URL, shared session and service state
   doctor  Check local services and Access redirect without changing state
+  disable Stop Mesh-managed public services; preserve DNS and credentials
 EOF
 }
 
 die() { printf 'mesh tuios: %s\n' "$*" >&2; exit 1; }
+launch_agent_running() {
+    local state
+    state="$(launchctl print "gui/$(id -u)/com.mesh.$1" 2>/dev/null)" || return 1
+    grep -qE 'state[[:space:]]*=[[:space:]]*running' <<< "$state"
+}
 
 verb="${1:---help}"
 shift 2>/dev/null || true
-case "$verb" in -h|--help|help) usage; exit 0 ;; setup|status|doctor) ;; *) usage >&2; die "unknown verb: $verb" ;; esac
+case "$verb" in -h|--help|help) usage; exit 0 ;; setup|status|doctor|disable) ;; *) usage >&2; die "unknown verb: $verb" ;; esac
 
 host="" confirm_email=""
 while [[ $# -gt 0 ]]; do
@@ -35,11 +43,15 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ "$verb" == setup ]]; then
-    script="${MESH_TUIOS_SETUP_SCRIPT:-$MESH_WORKSTATION_DIR/topics/remote-access/tuios/publish.sh}"
+if [[ "$verb" == setup || "$verb" == disable ]]; then
+    script="${MESH_TUIOS_SETUP_SCRIPT:-$RUNNER_ROOT/topics/remote-access/tuios/publish.sh}"
     [[ -r "$script" ]] || die "setup helper missing: $script"
     args=()
     if [[ -n "$host" ]]; then args=(--host "$host"); fi
+    if [[ "$verb" == disable ]]; then
+        [[ -z "$confirm_email" ]] || die '--confirm-access-email applies only to setup'
+        args+=(--disable)
+    fi
     if [[ -n "$confirm_email" ]]; then args+=(--confirm-access-email "$confirm_email"); fi
     exec bash "$script" "${args[@]}"
 fi
@@ -57,7 +69,7 @@ printf 'host: %s\nurl: https://%s\nsession: %s\nlocal port: %s\nremote port: %s\
 
 # Doctor is read-only; the publish helper adds deeper tunnel checks later.
 if [[ "${TUIOS_SERVICE_DRY_RUN:-0}" == 1 ]]; then exit 0; fi
-case "$(uname -s)" in
+case "${TUIOS_TEST_OS:-$(uname -s)}" in
     Linux)
         systemctl --user is-active tuios-web-local.service >/dev/null 2>&1 || die 'local TUIOS web service is not active'
         systemctl --user is-active tuios-web-remote.service >/dev/null 2>&1 || die 'remote TUIOS web service is not active'
@@ -66,8 +78,9 @@ case "$(uname -s)" in
         fi
         ;;
     Darwin)
-        launchctl print "gui/$(id -u)/com.mesh.tuios-web-local" >/dev/null 2>&1 || die 'local TUIOS web LaunchAgent is not loaded'
-        launchctl print "gui/$(id -u)/com.mesh.tuios-web-remote" >/dev/null 2>&1 || die 'remote TUIOS web LaunchAgent is not loaded'
+        launch_agent_running tuios-web-local || die 'local TUIOS web LaunchAgent is not running'
+        launch_agent_running tuios-web-remote || die 'remote TUIOS web LaunchAgent is not running'
+        launch_agent_running "tuios-tunnel-$alias_name" || die 'Cloudflare tunnel LaunchAgent is not running'
         ;;
 esac
 printf 'services: active\n'

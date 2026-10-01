@@ -111,11 +111,12 @@ EOF
     mv -f "$tmp" "$file"
 }
 
-host_arg="" confirm_email=""
+host_arg="" confirm_email="" disable=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --host) [[ $# -ge 2 ]] || _tuios_publish_fail '--host needs an alias'; host_arg="$2"; shift 2 ;;
         --confirm-access-email) [[ $# -ge 2 ]] || _tuios_publish_fail '--confirm-access-email needs an address'; confirm_email="$2"; shift 2 ;;
+        --disable) disable=1; shift ;;
         -h|--help)
             printf 'Usage: mesh tuios setup [--host ALIAS] [--confirm-access-email EMAIL]\n'
             exit 0
@@ -123,6 +124,15 @@ while [[ $# -gt 0 ]]; do
         *) _tuios_publish_fail "unknown option $1" ;;
     esac
 done
+
+if [[ "$disable" == 1 ]]; then
+    [[ -z "$confirm_email" ]] || _tuios_publish_fail '--disable cannot confirm Access'
+    alias_name="$(tuios_profile_alias "$host_arg")" || exit 1
+    tuios_service_public_safe_to_disable "$alias_name" || exit 1
+    uninstall "tuios-tunnel-$alias_name" tuios-web-remote || exit 1
+    printf 'Public TUIOS services stopped for %s; Cloudflare DNS, Access and credentials preserved.\n' "$alias_name"
+    exit 0
+fi
 
 _tuios_profile_seed "$host_arg" || exit 1
 alias_name="$(tuios_profile_alias "${host_arg:-${MESH_TUIOS_SETUP_ALIAS:-}}")" || exit 1

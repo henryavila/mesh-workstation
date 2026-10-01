@@ -52,4 +52,16 @@ export TUIOS_CLOUDFLARED_STATE_DIR="$SANDBOX/mac-state"
 if install && verify; then pass "installs digest-verified Mac archive"; else fail "installs digest-verified Mac archive"; fi
 assert_eq "$("$TUIOS_CLOUDFLARED_BIN_DIR/cloudflared" --version)" 'cloudflared version 2026.9.3' "installed Mac asset runs"
 
+export TUIOS_TEST_OS=Linux TUIOS_SERVICE_DRY_RUN=1
+export TUIOS_SYSTEMD_DIR="$SANDBOX/public-units"
+mkdir -p "$TUIOS_SYSTEMD_DIR"
+printf '# Managed by mesh-workstation: tuios-tunnel-testbox\n' > "$TUIOS_SYSTEMD_DIR/tuios-tunnel-testbox.service"
+printf '# Managed by mesh-workstation: tuios-web-remote\n' > "$TUIOS_SYSTEMD_DIR/tuios-web-remote.service"
+if uninstall; then pass "cloudflared uninstall succeeds"; else fail "cloudflared uninstall succeeds"; fi
+if [[ ! -e "$TUIOS_SYSTEMD_DIR/tuios-tunnel-testbox.service" && ! -e "$TUIOS_SYSTEMD_DIR/tuios-web-remote.service" ]]; then
+    pass "uninstall stops Mesh-owned public services"
+else
+    fail "uninstall stops Mesh-owned public services"
+fi
+
 summary

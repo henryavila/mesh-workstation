@@ -40,6 +40,8 @@ rc=$?
 assert_eq "$rc" 0 "mesh tuios help is registered"
 assert_contains "$out" 'setup' "help includes setup"
 assert_contains "$out" 'status' "help includes status"
+out="$( (unset MESH_WORKSTATION_DIR; MESH_HOME="$ROOT" bash "$ROOT/bin/mesh" tuios --help) 2>&1)"
+assert_not_contains "$out" 'No such file' "worktree command loads companion code from its own checkout"
 
 out="$(bash "$ROOT/bin/mesh" tuios status --host testbox 2>&1)"
 rc=$?
@@ -71,6 +73,10 @@ rc=$?
 assert_eq "$rc" 0 "setup accepts exact Access email confirmation"
 assert_contains "$out" 'argc=4' "setup forwards confirmation to publisher"
 assert_contains "$out" 'arg=user@example.com' "publisher receives confirmed email"
+out="$(bash "$ROOT/bin/mesh" tuios disable --host testbox 2>&1)"
+rc=$?
+assert_eq "$rc" 0 "disable delegates to publisher"
+assert_contains "$out" 'arg=--disable' "disable uses explicit operation flag"
 
 mkdir -p "$SANDBOX/fakebin"
 cat > "$SANDBOX/fakebin/systemctl" <<'SH'
@@ -97,6 +103,27 @@ export TUIOS_TEST_ACCESS_STATUS=200
 out="$(bash "$ROOT/bin/mesh" tuios doctor --host testbox 2>&1)"
 rc=$?
 assert_ne "$rc" 0 "doctor rejects public origin with no Access redirect"
+cat > "$SANDBOX/fakebin/launchctl" <<'SH'
+#!/bin/sh
+if [ "$1" = print ]; then
+  case "$2" in
+    *tuios-tunnel-testbox) [ "${TUIOS_TEST_TUNNEL_STATE:-running}" = running ] || { printf 'state = exited\n'; exit 0; } ;;
+  esac
+  printf 'state = running\n'
+  exit 0
+fi
+exit 1
+SH
+chmod +x "$SANDBOX/fakebin/launchctl"
+export TUIOS_TEST_OS=Darwin TUIOS_TEST_ACCESS_STATUS=302 TUIOS_TEST_TUNNEL_STATE=running
+out="$(bash "$ROOT/bin/mesh" tuios doctor --host testbox 2>&1)"
+rc=$?
+assert_eq "$rc" 0 "Mac doctor accepts running local, remote and tunnel agents"
+export TUIOS_TEST_TUNNEL_STATE=exited
+out="$(bash "$ROOT/bin/mesh" tuios doctor --host testbox 2>&1)"
+rc=$?
+assert_ne "$rc" 0 "Mac doctor rejects a loaded but stopped tunnel agent"
+unset TUIOS_TEST_OS TUIOS_TEST_TUNNEL_STATE
 export PATH="$old_path" TUIOS_SERVICE_DRY_RUN=1
 
 cat > "$MESH_TUIOS_PROFILE" <<'JSON'

@@ -46,6 +46,20 @@ _tuios_service_new_port_available() {
     [[ "$rc" -eq 1 ]]
 }
 
+_tuios_service_ensure_linger() {
+    local account state
+    command -v loginctl >/dev/null 2>&1 || return 1
+    account="$(id -un)"
+    state="$(loginctl show-user "$account" -p Linger 2>/dev/null)" || state=""
+    [[ "$state" == Linger=yes ]] && return 0
+    sudo loginctl enable-linger "$account" || {
+        printf 'tuios: could not enable user-service linger for %s\n' "$account" >&2
+        return 1
+    }
+    state="$(loginctl show-user "$account" -p Linger 2>/dev/null)" || state=""
+    [[ "$state" == Linger=yes ]]
+}
+
 _tuios_service_unit_arg() {
     local value="$1"
     if [[ "$value" =~ ^[A-Za-z0-9_./:@=-]+$ ]]; then printf '%s' "$value"; return; fi
@@ -117,6 +131,7 @@ _tuios_service_apply() {
                 printf 'tuios: systemd user manager unavailable; enable systemd in WSL, restart WSL, then rerun Mesh\n' >&2
                 return 1
             }
+            _tuios_service_ensure_linger || return 1
             systemctl --user daemon-reload || return 1
             systemctl --user enable --now "$name.service" || return 1
             if [[ "$changed" -eq 1 ]]; then systemctl --user restart "$name.service" || return 1; fi
@@ -218,7 +233,9 @@ check() {
             grep -qF "<string>$port</string>" "$path" || return 1
             grep -qF "<string>$(_tuios_service_xml "$session")</string>" "$path" || return 1
             [[ "${TUIOS_SERVICE_DRY_RUN:-0}" == 1 ]] && return 0
-            launchctl print "gui/$(id -u)/com.mesh.$name" >/dev/null 2>&1
+            local state
+            state="$(launchctl print "gui/$(id -u)/com.mesh.$name" 2>/dev/null)" || return 1
+            grep -qE 'state[[:space:]]*=[[:space:]]*running' <<< "$state"
             ;;
         *) return 1 ;;
     esac
@@ -246,7 +263,7 @@ restart() {
     done
 }
 
-uninstall() {
+_tuios_service_remove_names() {
     local os name path marker
     local names=(tuios-web-local tuios-web-remote)
     if [[ $# -gt 0 ]]; then names=("$@"); fi
@@ -275,4 +292,65 @@ uninstall() {
     fi
 }
 
+uninstall() { _tuios_service_remove_names "$@"; }
 rollback() { uninstall tuios-web-local; }
+
+tuios_service_disable_public() {
+    local os dir path name
+    local names=()
+    os="$(_tuios_service_os)"
+    if [[ "$os" == Linux ]]; then
+        dir="$(_tuios_service_systemd_dir)"
+        path="$dir/tuios-web-remote.service"
+        if [[ -f "$path" ]] && ! grep -qFx '# Managed by mesh-workstation: tuios-web-remote' "$path"; then
+            printf 'tuios: unmanaged public origin remains at %s\n' "$path" >&2
+            return 1
+        fi
+        for path in "$dir"/tuios-tunnel-*.service; do
+            [[ -f "$path" ]] || continue
+            name="${path##*/}"; name="${name%.service}"
+            if grep -qFx "# Managed by mesh-workstation: $name" "$path"; then names+=("$name"); fi
+        done
+    elif [[ "$os" == Darwin ]]; then
+        dir="$(_tuios_service_launchd_dir)"
+        path="$dir/com.mesh.tuios-web-remote.plist"
+        if [[ -f "$path" ]] && ! grep -qF 'Managed by mesh-workstation: tuios-web-remote' "$path"; then
+            printf 'tuios: unmanaged public origin remains at %s\n' "$path" >&2
+            return 1
+        fi
+        for path in "$dir"/com.mesh.tuios-tunnel-*.plist; do
+            [[ -f "$path" ]] || continue
+            name="${path##*/}"; name="${name#com.mesh.}"; name="${name%.plist}"
+            if grep -qF "Managed by mesh-workstation: $name" "$path"; then names+=("$name"); fi
+        done
+    else
+        return 1
+    fi
+    names+=(tuios-web-remote)
+    _tuios_service_remove_names "${names[@]}"
+}
+
+tuios_service_public_safe_to_disable() {
+    local alias="$1" os dir path marker
+    os="$(_tuios_service_os)"
+    if [[ "$os" == Linux ]]; then
+        dir="$(_tuios_service_systemd_dir)"
+        path="$dir/cloudflared-tuios-$alias.service"
+        if [[ -f "$path" ]]; then
+            printf 'tuios: unmanaged pilot tunnel remains at %s\n' "$path" >&2
+            return 1
+        fi
+        path="$dir/tuios-web-remote.service"
+        marker='# Managed by mesh-workstation: tuios-web-remote'
+    elif [[ "$os" == Darwin ]]; then
+        dir="$(_tuios_service_launchd_dir)"
+        path="$dir/com.mesh.tuios-web-remote.plist"
+        marker='Managed by mesh-workstation: tuios-web-remote'
+    else
+        return 1
+    fi
+    if [[ -f "$path" ]] && ! grep -qF "$marker" "$path"; then
+        printf 'tuios: unmanaged public origin remains at %s\n' "$path" >&2
+        return 1
+    fi
+}

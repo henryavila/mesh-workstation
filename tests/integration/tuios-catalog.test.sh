@@ -43,12 +43,19 @@ fi
 idx="$(bundle_index tuios)" || idx=""
 if [[ -n "$idx" ]]; then
     systemd_item=""
+    binary_item=""
     count_var="BUNDLE_${idx}_ITEM_COUNT"
     for ((j=0; j<${!count_var:-0}; j++)); do
         item_var="BUNDLE_${idx}_ITEM_${j}_NAME"
         if [[ "${!item_var:-}" == systemd-wsl ]]; then systemd_item="$j"; break; fi
     done
     assert_ne "$systemd_item" "" "TUIOS WSL bundle prepares persistent systemd"
+    for ((j=0; j<${!count_var:-0}; j++)); do
+        item_var="BUNDLE_${idx}_ITEM_${j}_NAME"
+        if [[ "${!item_var:-}" == tuios-binaries ]]; then binary_item="$j"; break; fi
+    done
+    update_var="BUNDLE_${idx}_ITEM_${binary_item}_AUTOUPDATE"
+    assert_eq "${!update_var:-0}" "0" "stateful daemon binaries do not autoupdate during work"
 fi
 
 if [[ -f "$PROFILE" ]]; then

@@ -1,13 +1,15 @@
 # yaml-language-server: $schema=../../schema/manifest.schema.json
 topic:
   label: "Remote Access"
-  hint: "sshd + Tailscale + mosh + code-server"
+  hint: "sshd, Tailscale, mosh, TUIOS browser and code-server"
   required: false
   order: 90
   description: |
     Reach this machine from anywhere: sshd, Tailscale (with the MTU fix that
     keeps SSH-over-Tailscale from hanging), and mosh for flaky links. The
-    optional code-server bundle serves VS Code over your tailnet.
+    optional code-server bundle serves VS Code over your tailnet. TUIOS offers
+    persistent terminal sessions in the local browser; Cloudflare publication
+    is a separate opt-in bundle.
 
 bundles:
 
@@ -111,8 +113,6 @@ bundles:
       - name: tuios-binaries
         type: custom
         script: ./tuios/install-binaries.sh
-        autoupdate: true
-        restart_service: tuios-local-web
       - name: tuios-local-web
         type: custom
         script: ./tuios/services.sh
