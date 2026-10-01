@@ -8,6 +8,9 @@ they are **omitted from the catalog**.
 
 `remote-access/tuios` and `remote-access/tuios-cloudflare` are also opt-in.
 TUIOS does not require Tailscale or SSH on the phone.
+On an existing machine, add these bundles in the interactive Mesh menu while
+keeping its other selections. `setup.sh --bundle` replaces the entire saved
+selection list and may uninstall bundles omitted from that command.
 
 ## TUIOS browser terminal
 
