@@ -158,6 +158,10 @@ bundles:
         type: custom
         script: ./install-yazi-flavor.sh
         soft_fail: true
+      - name: yazi-herdr-plugin
+        type: custom
+        script: ./install-herdr-yazi-plugin.sh
+        soft_fail: true
       - name: git-delta-wsl
         type: custom
         script: ./wsl/install-delta.sh

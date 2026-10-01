@@ -1,0 +1,12 @@
+id = "mesh.yazi"
+name = "Yazi"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Yazi overlay file picker for mesh workspaces"
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "picker"
+title = "Yazi"
+placement = "overlay"
+command = ["yazi-choose"]
