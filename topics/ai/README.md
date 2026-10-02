@@ -12,7 +12,7 @@ If you don't select the `claude-mem` bundle, Bun is unused but harmless.
 
 ## 2. Claude Code CLI
 
-Via the official installer: `curl -fsSL https://claude.ai/install.sh | bash`. Binary lands at `~/.local/bin/claude` (the `PATH` is already covered by topic `30-shell`).
+Via the official installer: `curl -fsSL https://claude.ai/install.sh | bash -s latest`. Binary lands at `~/.local/bin/claude` (the `PATH` is already covered by topic `30-shell`). The `latest` argument is the native release channel (not `stable`, which lags). `mesh upgrade` re-runs this installer because `check()` is presence-only.
 
 **Login:** after installing, run `claude` and authenticate once per machine (OAuth with Anthropic — not transferable).
 

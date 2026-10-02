@@ -159,6 +159,10 @@ grep -qE '^update\(\)' "$WS/topics/ai/install-moshi-hook.sh" \
   && ok "install-moshi-hook.sh (WSL) defines update()"   || bad "moshi-hook-linux has no update() — flag is a no-op there"
 grep -qE '^update\(\)' "$WS/topics/ai/install-rtk.sh" \
   && ok "install-rtk.sh defines update()"                || bad "install-rtk.sh has no update()"
+grep -qE '^update\(\)' "$WS/topics/ai/install-claude.sh" \
+  && ok "install-claude.sh defines update()"             || bad "install-claude.sh has no update() — flag is a no-op there"
+grep -qE '^update\(\)' "$WS/topics/ai/install-bun.sh" \
+  && ok "install-bun.sh defines update()"                || bad "install-bun.sh has no update() — flag is a no-op there"
 
 # ── 7. the real ai manifest emits _AUTOUPDATE for the flagged leaf set ──
 au_count="$(bash "$WS/scripts/lib/yaml-parse.sh" < "$WS/topics/ai/manifest.yaml" 2>/dev/null | grep -c '_AUTOUPDATE=1')"

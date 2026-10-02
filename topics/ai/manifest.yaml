@@ -19,9 +19,11 @@ bundles:
       - name: bun
         type: custom
         script: ./install-bun.sh
+        autoupdate: true   # bun upgrade; claude-mem worker needs a current runtime
       - name: claude-code-cli
         type: custom
         script: ./install-claude.sh
+        autoupdate: true   # native installer latest channel; check() is presence-only
       - name: claudebar
         type: npx
         spec: "@henryavila/claudebar@latest install"
@@ -72,10 +74,10 @@ bundles:
       - name: mdprobe
         type: npm-global
         spec: "@henryavila/mdprobe"
-        # Install-if-missing on setup (fast). Updating a stale install is the
-        # job of the opt-in version-aware update mode (`mesh update`), NOT of
-        # reinstalling every run — see docs/…-version-aware-update-spec.md.
+        # Install-if-missing on setup (fast). `autoupdate: true` is what
+        # actually upgrades a stale global via npm_global_update.
         check: "command -v mdprobe"
+        autoupdate: true
 
   - name: atomic-skills
     label: "atomic-skills"
@@ -84,7 +86,8 @@ bundles:
     items:
       - name: atomic-skills
         type: npx
-        spec: "@henryavila/atomic-skills@1.7.0 install --yes --all-detected --lang pt"
+        spec: "@henryavila/atomic-skills@latest install --yes --all-detected --lang pt"
+        autoupdate: true   # npx_update re-runs @latest; a pinned @version would freeze
 
   - name: rtk
     label: "rtk"
@@ -115,6 +118,7 @@ bundles:
         # local `worker` runtime (SQLite on :37777). --no-auto-start leaves the
         # worker stopped; the dump/pull sync hooks (mesh-identity) bring it up.
         spec: "claude-mem@latest install --ide claude-code --provider claude --runtime worker --no-auto-start"
+        autoupdate: true   # npx_update re-runs @latest; check() would otherwise freeze the plugin
         # Idempotent self-healing check (overrides the npx driver's always-run
         # check). Passes only when the plugin is BOTH present (cache dir) AND its
         # marketplace deps are installed (node_modules) — so a cached-but-broken
