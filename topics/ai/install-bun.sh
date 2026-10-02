@@ -23,6 +23,22 @@ verify() {
     check
 }
 
+# Version-aware update (engine --update + `mesh upgrade`): `bun upgrade` is the
+# official self-update. Fall back to re-running the installer when the binary
+# is missing (so a broken install still heals). Absolute path first — the
+# engine item-subshell often lacks ~/.bun/bin on PATH.
+update() {
+    local bin="$HOME/.bun/bin/bun"
+    if [[ ! -x "$bin" ]]; then
+        bin="$(command -v bun 2>/dev/null || true)"
+    fi
+    if [[ -n "$bin" && -x "$bin" ]]; then
+        "$bin" upgrade
+        return
+    fi
+    install
+}
+
 repair() { install; }
 
 rollback() {

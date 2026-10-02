@@ -6,8 +6,18 @@ check() {
 }
 
 install() {
-    # pipefail so a failed curl is reported as install failure, not masked by bash's rc 0
-    ( set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash )
+    # pipefail so a failed curl is reported as install failure, not masked by bash's rc 0.
+    # The argument is the native installer's release channel AND the default for
+    # later auto-updates. Pass `latest` (not `stable`) so mesh hosts get each
+    # release as it ships — stable lags ~a week and skips some versions.
+    ( set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s latest )
+}
+
+# Version-aware update (engine --update + `mesh upgrade`): check() is
+# presence-only, so a stale CLI would otherwise freeze forever. Re-run the
+# official installer on the latest channel; it is a no-op when already current.
+update() {
+    install
 }
 
 verify() {
