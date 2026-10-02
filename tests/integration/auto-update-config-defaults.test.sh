@@ -50,8 +50,10 @@ assert_not_contains "$out" "unbound variable" "no unbound-variable crash on a mi
 assert_eq "$rc" "0" "auto-update exits 0 on a minimal config"
 assert_eq "$(git -C "$TMP/work" rev-parse HEAD)" "$NEW" "the update actually completed (HEAD advanced)"
 
-# persist_code_dir may create ~/.config/mesh/config.env with only CODE_DIR.
-# The zsh login hook then sources it as CONF; AUTO_UPDATE_REPOS is unset.
+# Leftover/partial config.env (pre-seed installer, or a guest file with only
+# CODE_DIR). The zsh login hook sources it as CONF; AUTO_UPDATE_REPOS is unset.
+# setup.sh now seeds the array on a normal install; keep these guards for files
+# that predate that seed.
 printf 'CODE_DIR=%s\n' "$TMP/code" > "$TMP/conf-partial"
 mkdir -p "$TMP/st2" "$TMP/st3" "$TMP/st4"
 

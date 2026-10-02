@@ -1,8 +1,9 @@
 # scripts/auto-update.conf — config for scripts/auto-update.sh
 #
 # Bash-sourceable. No JSON/YAML parser dep.
-# Deployed to ~/.config/mesh/config.env in `once` mode by
-# setup.sh — edit there directly, not in the repo.
+# setup.sh seeds AUTO_UPDATE_REPOS (and MESH_*_DIR / CODE_DIR) into
+# ~/.config/mesh/config.env once. Edit that file directly; this example
+# is documentation, not a live deploy source.
 #
 # Spec: docs/2026-04-25-auto-update-spec.md (auto-update motor)
 #       docs/2026-05-02-mesh-cli-refactor-spec.md (mesh CLI dispatcher)

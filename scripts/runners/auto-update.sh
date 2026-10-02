@@ -143,8 +143,9 @@ source "$CONF"
 : "${AUTO_UPDATE_FETCH_TIMEOUT:=3}"
 : "${AUTO_UPDATE_SUDO_REGEX:=\\b(apt|brew|pip install|npm i |chsh|sudo)\\b|curl[^|]*\\|[^|]*sh}"
 
-# persist_code_dir writes CODE_DIR into config.env without AUTO_UPDATE_REPOS.
+# Pre-fix installs (and guests) may have a CODE_DIR-only config.env.
 # Under `set -u`, ${#AUTO_UPDATE_REPOS[@]} then aborts every zsh login.
+# setup.sh now seeds the array; keep this guard for leftover partial files.
 if ! declare -p AUTO_UPDATE_REPOS >/dev/null 2>&1; then
     AUTO_UPDATE_REPOS=()
 fi

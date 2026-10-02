@@ -592,6 +592,55 @@ persist_workstation_dir() {
 }
 persist_workstation_dir
 
+# Identity clone destination for the shell + auto-update. Same upsert as
+# persist_workstation_dir: one MESH_IDENTITY_DIR line, other keys untouched.
+persist_identity_dir() {
+    [[ "$DRY_RUN" == "1" ]] && return 0
+    local config="$SELECTIONS_DIR/config.env"
+    local dir="${MESH_IDENTITY_DIR:-$HOME/mesh-identity}"
+    [[ -n "$dir" ]] || return 0
+    export MESH_IDENTITY_DIR="$dir"
+    mkdir -p "$SELECTIONS_DIR"
+    local tmp; tmp="$(mktemp "$SELECTIONS_DIR/.config.env.XXXXXX")" || return 0
+    {
+        [[ -f "$config" ]] && grep -v '^MESH_IDENTITY_DIR=' "$config"
+        printf 'MESH_IDENTITY_DIR=%q\n' "$dir"
+    } > "$tmp" && mv "$tmp" "$config" || { rm -f "$tmp"; return 0; }
+    info "identity dir persisted: MESH_IDENTITY_DIR=$dir → ${config/#$HOME/\~}"
+}
+persist_identity_dir
+
+# AUTO_UPDATE_REPOS is required by `mesh update`. persist_code_dir /
+# persist_workstation_dir used to CREATE config.env with only those keys, so a
+# fresh install left the array empty and manual `mesh update -o mesh-identity`
+# failed. Seed once (never overwrite a user-edited list). Expanded absolute
+# paths: later CODE_DIR/MESH_*_DIR upserts append, so `$VAR` refs would expand
+# against a stale/empty value. --no-mesh omits identity (no membership clone).
+persist_auto_update_repos() {
+    [[ "$DRY_RUN" == "1" ]] && return 0
+    local config="$SELECTIONS_DIR/config.env"
+    mkdir -p "$SELECTIONS_DIR"
+    if [[ -f "$config" ]] && grep -q '^AUTO_UPDATE_REPOS=' "$config"; then
+        return 0
+    fi
+    local ws="${MESH_WORKSTATION_DIR:-$HERE}"
+    local id="${MESH_IDENTITY_DIR:-$HOME/mesh-identity}"
+    [[ -n "$ws" ]] || return 0
+    local tmp
+    tmp="$(mktemp "$SELECTIONS_DIR/.config.env.XXXXXX")" || return 0
+    {
+        [[ -f "$config" ]] && cat "$config"
+        printf 'AUTO_UPDATE_REPOS=(\n'
+        printf '    %q\n' "$ws"
+        if [[ "${MESH_NO_MESH:-0}" != "1" ]]; then
+            printf '    %q\n' "$id"
+        fi
+        printf ')\n'
+    } > "$tmp" && mv "$tmp" "$config" || { rm -f "$tmp"; return 0; }
+    info "auto-update repos seeded → ${config/#$HOME/\~}"
+}
+persist_auto_update_repos
+
 if [[ "$ADOPT_MODE" == "1" ]]; then
     # Adopt probes EVERY bundle (not just the default/saved selection) so an
     # opt-in tool installed under v1 also gets its marker. Never persist a
