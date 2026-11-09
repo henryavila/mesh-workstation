@@ -159,5 +159,22 @@ _uninstall_pip() {
 _uninstall_npx() {
     local spec="$1"
     local pkg="${spec%% *}"
-    info "uninstall npx:$pkg (advisory — npx packages have no persistent install)"
+    info "uninstall npx:$pkg"
+    if command -v npx >/dev/null 2>&1; then
+        npx -y "$pkg" uninstall </dev/null >/dev/null 2>&1 || true
+    fi
+    case "$pkg" in
+        *claude-mem*)
+            if command -v claude >/dev/null 2>&1; then
+                claude plugin uninstall claude-mem@thedotmack </dev/null >/dev/null 2>&1 || true
+                claude plugin marketplace remove thedotmack </dev/null >/dev/null 2>&1 || true
+            fi
+            pkill -f "worker-service.cjs" 2>/dev/null || true
+            pkill -f "chroma-mcp.*claude-mem" 2>/dev/null || true
+            pkill -f "mcp-server.cjs" 2>/dev/null || true
+            local dir="$HOME/.claude-mem"
+            [[ -d "$dir" ]] && rm -rf "$dir" 2>/dev/null || true
+            rm -f "$HOME/.local/bin/claude-mem" 2>/dev/null || true
+            ;;
+    esac
 }
