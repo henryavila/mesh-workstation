@@ -168,15 +168,10 @@ assert_ne "$rc" 0 "syncthing unsafe verb is rejected"
 assert_contains "$out" "only \`syncthing pair\` and \`syncthing status\` can fan out" \
     "syncthing rejection names safe verbs"
 
-out="$(run_mesh run --all services list 2>&1)"
+out="$(run_mesh run --all services status 2>&1)"
 rc=$?
-assert_ne "$rc" 0 "services unsafe verb is rejected"
-assert_contains "$out" "services can only fan out" "services rejection names allowlist"
-
-out="$(run_mesh run --hosts self services restart mysql 2>&1)"
-rc=$?
-assert_eq "$rc" 0 "services restart local fanout exits 0"
-assert_contains "$out" "SERVICES:restart mysql:noninteractive=1" "services fanout receives NON_INTERACTIVE"
+assert_ne "$rc" 0 "services fan-out is rejected"
+assert_contains "$out" "unsupported mesh subcommand 'services'" "services is not a registered fan-out"
 
 echo
 summary

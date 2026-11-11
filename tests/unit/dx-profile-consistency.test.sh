@@ -229,11 +229,117 @@ contract_shape() {
         "For a headless Linux server: setup.sh --server")"
 }
 
-# on in F1
-removed_bundles() { dx_skip "removed-bundles" "F1"; }
+# Print every topic/bundle declared in topics/*/manifest.yaml.
+dx_manifest_bundles() {
+    local mf topic vf
+    for mf in "$WS"/topics/*/manifest.yaml; do
+        [ -f "$mf" ] || continue
+        topic="$(basename "$(dirname "$mf")")"
+        vf="$(bash "$PARSER" < "$mf" 2>/dev/null)" || return 1
+        (
+            eval "$vf"
+            [ "${__YAML_PARSE_OK:-0}" = "1" ] || exit 1
+            i=0
+            n="${BUNDLE_COUNT:-0}"
+            while [ "$i" -lt "$n" ]; do
+                name_v="BUNDLE_${i}_NAME"
+                name="${!name_v:-}"
+                [ -n "$name" ] || exit 1
+                printf '%s/%s\n' "$topic" "$name"
+                i=$((i + 1))
+            done
+        ) || return 1
+    done
+}
+
+dx_bundle_sections() {
+    dx_section removed
+    dx_section workstation-default
+    dx_section workstation-optional
+    dx_section server-default
+    dx_section server-optional
+    dx_section server-forbidden
+    dx_section identity-only
+}
 
 # on in F1
-removed_commands() { dx_skip "removed-commands" "F1"; }
+removed_bundles() {
+    local parsed known removed_ids manifests id hit
+    parsed="$(bash "$PARSER" < "$CONTRACT" 2>/dev/null)" || {
+        fail "removed-bundles could not parse the contract"
+        return
+    }
+    eval "$parsed"
+    if [ "${__YAML_PARSE_OK:-0}" != "1" ]; then
+        fail "removed-bundles contract parse missed the sentinel"
+        return
+    fi
+    known="$(dx_bundle_sections)"
+    removed_ids="$(dx_section removed)"
+    if ! manifests="$(dx_manifest_bundles)"; then
+        fail "removed-bundles could not parse a topic manifest"
+        return
+    fi
+
+    hit=0
+    while IFS= read -r id; do
+        [ -n "$id" ] || continue
+        if printf '%s\n' "$manifests" | grep -qx "$id"; then
+            fail "removed bundle still has a manifest: $id"
+            hit=1
+        fi
+    done <<EOF
+$removed_ids
+EOF
+    if [ "$hit" -eq 0 ]; then
+        pass "removed bundles have no manifests"
+    fi
+
+    hit=0
+    while IFS= read -r id; do
+        [ -n "$id" ] || continue
+        if ! printf '%s\n' "$known" | grep -qx "$id"; then
+            fail "manifest bundle is absent from dx-profiles.yaml: $id"
+            hit=1
+        fi
+    done <<EOF
+$manifests
+EOF
+    if [ "$hit" -eq 0 ]; then
+        pass "every manifest bundle is in the contract"
+    fi
+}
+
+# on in F1
+removed_commands() {
+    local out rc names cmd
+    out="$(bash "$WS/bin/mesh" __commands 2>"$HERE/dx-commands.err")"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        fail "mesh __commands failed (rc=$rc)"
+        cat "$HERE/dx-commands.err" >&2
+        rm -f "$HERE/dx-commands.err"
+        return
+    fi
+    rm -f "$HERE/dx-commands.err"
+    names="$(printf '%s\n' "$out" | awk -F '\t' 'NF { print $1 }')"
+    for cmd in tuios services; do
+        if printf '%s\n' "$names" | grep -qx "$cmd"; then
+            fail "mesh __commands still lists $cmd"
+        else
+            pass "mesh __commands does not list $cmd"
+        fi
+    done
+
+    out="$(bash "$WS/bin/mesh" run --dry-run --all services status 2>&1)"
+    rc=$?
+    if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -q "unsupported mesh subcommand 'services'"; then
+        pass "mesh run rejects a services fan-out"
+    else
+        fail "mesh run still accepts services (rc=$rc)"
+        printf '%s\n' "$out" >&2
+    fi
+}
 
 # on in F2
 profiles() { dx_skip "profiles" "F2"; }

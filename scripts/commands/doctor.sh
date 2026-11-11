@@ -13,15 +13,13 @@ Usage:
   mesh doctor --fix      Verify every installed item's strongest probe and REPAIR
                          broken-but-installed items through the installer (engine
                          --repair). Reinstalls a brew formula whose dylib a
-                         dependency bump removed, restarts a dead valet stack, etc.
+                         dependency bump removed.
                          rc 0 = healthy/repaired, 67 = unresolved.
 
 Recovery:
-  Broken PHP, Valet, nginx, or php-fpm runtime:
-    mesh doctor --fix
   Messy bash/zsh, unmanaged rc, login-shell mismatch:
     mesh reinstall shell
-    --fix does not rewrite shell rc files and will not touch PHP/databases.
+    --fix does not rewrite shell rc files.
   New owner on an upgraded marker-owned bundle:
     mesh doctor --fix    Adopt it when healthy, or repair and then record it.
   Reapply the complete saved selection after an update:

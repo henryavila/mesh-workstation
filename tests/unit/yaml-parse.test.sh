@@ -61,7 +61,7 @@ run_invalid() {
 }
 
 echo "=== reference manifest: topics/web ==="
-run_valid "$TOPICS/web/manifest.yaml" '
+run_valid "$FIX/reference-web.yaml" '
     [ "${__YAML_PARSE_OK:-0}" = 1 ] || exit 1
     [ "$TOPIC_LABEL" = "Web" ] || exit 1
     [ "$TOPIC_ORDER" = 70 ] || exit 1
@@ -94,7 +94,7 @@ run_valid "$TOPICS/web/manifest.yaml" '
 '
 
 echo "=== reference manifest: topics/databases ==="
-run_valid "$TOPICS/databases/manifest.yaml" '
+run_valid "$FIX/reference-databases.yaml" '
     [ "$BUNDLE_COUNT" = 4 ] || exit 1
     # per-item platforms (inline) + uninstall_tier.
     [ "$BUNDLE_0_ITEM_0_NAME" = "mysql-mac" ] || exit 1
@@ -108,7 +108,7 @@ run_valid "$TOPICS/databases/manifest.yaml" '
 '
 
 echo "=== databases META mode: choice meta emitted ==="
-run_valid "$TOPICS/databases/manifest.yaml" '
+run_valid "$FIX/reference-databases.yaml" '
     [ "$BUNDLE_2_OPTION_0_HAS_CHOICES" = 1 ] || exit 1
     [ "$BUNDLE_2_OPTION_0_CHOICE_COUNT" = 3 ] || exit 1
     [ "$BUNDLE_2_OPTION_0_CHOICE_DEFAULT_COUNT" = 0 ] || exit 1
@@ -154,7 +154,7 @@ run_invalid "$FIX/invalid-unknown-item-key.yaml" "unknown item key"
 
 echo "=== sentinel discipline ==="
 # Present on success (last line).
-out_ok=$("$PARSER" < "$TOPICS/web/manifest.yaml")
+out_ok=$("$PARSER" < "$FIX/reference-web.yaml")
 if printf '%s' "$out_ok" | tail -1 | grep -q '^__YAML_PARSE_OK=1$'; then
     pass=$((pass + 1)); echo "  PASS: sentinel last line on success"
 else

@@ -21,13 +21,12 @@ emit_lean_bootstrap_selections() {
         shell-terminal/cli-tools \
         shell-terminal/zsh \
         shell-terminal/fonts \
-        languages/node \
         personal/personal
 }
 
 lean="$(emit_lean_bootstrap_selections)"
 assert_contains "$lean" "foundation/base" "lean includes foundation/base"
-assert_contains "$lean" "languages/node" "lean includes languages/node"
+assert_not_contains "$lean" "languages/" "lean does not include removed language bundles"
 assert_contains "$lean" "shell-terminal/fonts" "lean includes fonts for WT/NF"
 assert_contains "$lean" "personal/personal" "lean keeps personal (TTY onboarding)"
 assert_not_contains "$lean" "databases/" "lean must not pull databases"

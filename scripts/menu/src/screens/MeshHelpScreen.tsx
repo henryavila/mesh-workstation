@@ -127,25 +127,6 @@ export const MESH_HELP_COMMANDS: HelpCommand[] = [
     ],
   },
   {
-    id: 'services',
-    usage: 'mesh services <verb> [name...]',
-    summary: 'Control mesh-owned daemons',
-    details: [
-      'Lists and controls curated services such as database, web, and sync daemons.',
-      'Tracks active and enabled as separate states.',
-    ],
-  },
-  {
-    id: 'tuios',
-    usage: 'mesh tuios <setup|status|doctor|disable> [--host ALIAS]',
-    summary: 'Browser terminal access',
-    details: [
-      'Configures one protected browser URL per machine while sharing its local TUIOS session.',
-      'After creating the Access app, confirm its email policy and supply its Application AUD tag.',
-      'Use status and doctor to inspect the host, or disable to stop only Mesh-managed public services.',
-    ],
-  },
-  {
     id: 'ai',
     usage: 'mesh ai [term] [--agent X]',
     summary: 'Open an agent or shell in a repo',

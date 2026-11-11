@@ -54,7 +54,7 @@ assert_eq "$out" "STATUS:--json" "top-level --json routes to status"
 
 echo
 echo "module-backed public commands"
-expected_commands="status snap doctor adopt update upgrade topic run init template-check lint catalog personal-clone menu setup secret syncthing clean ai config services reinstall"
+expected_commands="status snap doctor adopt update upgrade topic run init template-check lint catalog personal-clone menu setup secret syncthing clean ai config reinstall"
 commands_out="$(run_mesh __commands 2>&1)"
 for name in $expected_commands; do
     count="$(printf '%s\n' "$commands_out" | awk -F '\t' -v n="$name" '$1 == n { c++ } END { print c + 0 }')"

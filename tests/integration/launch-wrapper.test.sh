@@ -251,49 +251,4 @@ assert_pattern_present "$TOPIC" 'curl.*127\.0\.0\.1:8384' \
 assert_pattern_absent "$TOPIC" 'workaround: create ~/Library/LaunchAgents' \
     "80-claude-code no longer instructs manual plist creation (regression guard)"
 
-# ---------------------------------------------------------------------
-# Layer 3: 60-web-stack (redis) integration
-# ---------------------------------------------------------------------
-WS_TOPIC="$ROOT/topics/databases/mac/redis.sh"
-echo
-echo "═══ topics/60-web-stack/mac/redis.sh — redis wrapper integration ═══"
-assert_pattern_present "$WS_TOPIC" '(source|^[[:space:]]*\.).*lib/launch-wrapper\.sh' \
-    "60-web-stack sources lib/launch-wrapper.sh (source or dot-include)"
-assert_pattern_present "$WS_TOPIC" '(use_launch_wrapper=1|_use_wrapper)' \
-    "60-web-stack flags the custom-prefix branch (use_launch_wrapper var or _use_wrapper helper)"
-assert_pattern_present "$WS_TOPIC" '[-]-svc redis' \
-    "60-web-stack invokes wrapper with --svc redis"
-assert_pattern_present "$WS_TOPIC" '[-]-label "com\.\$\{USER\}\.redis"' \
-    "60-web-stack labels redis plist com.\${USER}.redis"
-assert_pattern_present "$WS_TOPIC" '[-]-workdir "\$\{?BREW_PREFIX\}?/var"' \
-    "60-web-stack passes --workdir \$BREW_PREFIX/var (matches brew formula default)"
-assert_pattern_present "$WS_TOPIC" '\$\{?BREW_PREFIX\}?/etc/redis\.conf' \
-    "60-web-stack passes \$BREW_PREFIX/etc/redis.conf as redis arg"
-
-# Canonical-prefix branch keeps `brew services start redis` (don't break
-# users who run on /opt/homebrew or /usr/local).
-assert_pattern_present "$WS_TOPIC" 'BREW_BIN.*services start redis' \
-    "60-web-stack canonical branch keeps brew services start redis"
-
-# ---------------------------------------------------------------------
-# Layer 4: install-mailpit.sh integration
-# ---------------------------------------------------------------------
-MP="$ROOT/topics/web/scripts/install-mailpit.sh"
-echo
-echo "═══ install-mailpit.sh — mailpit wrapper integration ═══"
-assert_pattern_present "$MP" 'source.*lib/launch-wrapper\.sh' \
-    "install-mailpit sources lib/launch-wrapper.sh (relative path resolves)"
-assert_pattern_present "$MP" 'mp_use_wrapper=1' \
-    "install-mailpit sets mp_use_wrapper flag for custom prefix"
-assert_pattern_present "$MP" '[-]-svc mailpit' \
-    "install-mailpit invokes wrapper with --svc mailpit"
-assert_pattern_present "$MP" '[-]-label "com\.\$\{USER\}\.mailpit"' \
-    "install-mailpit labels mailpit plist com.\${USER}.mailpit"
-assert_pattern_present "$MP" '[-]-brew-bin "\$BREW_PREFIX/opt/mailpit/bin/mailpit"' \
-    "install-mailpit points wrapper at \$BREW_PREFIX/opt/mailpit/bin/mailpit"
-
-# Canonical-prefix branch still has the brew services flow
-assert_pattern_present "$MP" '[$]BREW_BIN" services start mailpit' \
-    "install-mailpit canonical branch keeps brew services start mailpit"
-
 summary

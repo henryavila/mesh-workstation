@@ -1,4 +1,0 @@
-#compdef art artisan
-# Zsh completion for Laravel artisan.
-# Project-aware: detects artisan in cwd or parent dirs.
-# Customize per your project's artisan commands.

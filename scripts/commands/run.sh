@@ -543,13 +543,6 @@ _mesh_fanout_validate_syncthing() {
     esac
 }
 
-_mesh_fanout_validate_services() {
-    case "${1:-}" in
-        status|start|stop|restart|enable|disable) ;;
-        *) _die "run: services can only fan out: status, start, stop, restart, enable, disable (got '${1:-<none>}')" ;;
-    esac
-}
-
 _mesh_fanout_env_noninteractive() {
     printf 'NON_INTERACTIVE=1\n'
 }
@@ -620,8 +613,7 @@ Default with no host flag opens a multi-select when fzf/whiptail is available.
 Online configured hosts are preselected; Tab toggles, Enter confirms. A text
 prompt is used only as fallback when no interactive selector is available.
 
-Supported subcommands: status, snap, update, syncthing pair|status,
-services <status|start|stop|restart|enable|disable> <name>...
+Supported subcommands: status, snap, update, syncthing pair|status.
 
 Examples:
   mesh run update -f
@@ -629,7 +621,6 @@ Examples:
   mesh run --online snap --quiet
   mesh run --all status --write
   mesh run --all syncthing pair          Reconcile every host from one place
-  mesh run --all services stop mysql     Stop a service across the mesh
 EOF
 }
 
@@ -688,7 +679,7 @@ cmd_run_run() {
         esac
     done
 
-    (( $# > 0 )) || _die "run: missing mesh subcommand (status | snap | update | syncthing pair|status | services <verb> <name>...)"
+    (( $# > 0 )) || _die "run: missing mesh subcommand (status | snap | update | syncthing pair|status)"
     local mesh_subcommand="$1"
     shift
     local mesh_args=("$@")

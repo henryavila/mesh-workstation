@@ -142,12 +142,8 @@ assert_run_rejects "syncthing rejects password" "only \`syncthing pair\` and \`s
 assert_run_rejects "syncthing rejects topology" "only \`syncthing pair\` and \`syncthing status\` can fan out" --all syncthing topology
 
 echo
-echo "services fanout validator"
-for verb in status start stop restart enable disable; do
-    assert_run_accepts "services $verb fanout" services "$verb" mysql
-done
-assert_run_rejects "services rejects list" "services can only fan out" --all services list
-assert_run_rejects "services rejects missing verb" "services can only fan out" --all services
+echo "removed services fan-out"
+assert_run_rejects "services is not a fan-out" "unsupported mesh subcommand 'services'" --all services status
 
 echo
 echo "unsupported commands"

@@ -41,7 +41,6 @@ source "$ROOT/tests/lib/assert.sh"
 # Topic was renamed 60-web-stack → web during the engine migration (commit
 # 8e46092). The hardening script moved with it; the assertion labels below
 # still say "60-web-stack" but the path is the live one.
-WEB_MAC="$ROOT/topics/web/mac/launchdaemon-hardening.sh"
 DETECT="$ROOT/scripts/lib/detect-brew.sh"
 
 assert_pattern_present() {
@@ -63,64 +62,6 @@ assert_pattern_absent() {
 }
 
 echo
-echo "═══ 60-web-stack/install.mac.sh — LaunchDaemon hardening ═══"
-
-# Block must exist: branches on $BREW_PREFIX (case statement OR helper)
-assert_pattern_present "$WEB_MAC" '(case "\$BREW_PREFIX" in|_is_custom_prefix)' \
-    "60-web-stack/install.mac.sh — gates hardening on BREW_PREFIX (case stmt or helper)"
-
-# Standard prefixes (/opt/homebrew, /usr/local) explicitly skip
-assert_pattern_present "$WEB_MAC" '/opt/homebrew\|/usr/local' \
-    "60-web-stack/install.mac.sh — names /opt/homebrew and /usr/local as standard (skip path)"
-
-# Uses PlistBuddy (Apple's canonical plist editor; idempotent Set)
-assert_pattern_present "$WEB_MAC" '/usr/libexec/PlistBuddy' \
-    "60-web-stack/install.mac.sh — uses /usr/libexec/PlistBuddy for surgical plist edits"
-
-# Targets BOTH StandardErrorPath and StandardOutPath
-assert_pattern_present "$WEB_MAC" 'StandardErrorPath' \
-    "60-web-stack/install.mac.sh — rewrites StandardErrorPath"
-assert_pattern_present "$WEB_MAC" 'StandardOutPath' \
-    "60-web-stack/install.mac.sh — rewrites StandardOutPath"
-
-# Target log dir is /var/log/homebrew/* (rootfs path, not /Volumes/*)
-assert_pattern_present "$WEB_MAC" '/var/log/homebrew' \
-    "60-web-stack/install.mac.sh — Standard*Path moves to /var/log/homebrew/ (rootfs)"
-
-# Creates the target log dir (so PlistBuddy + launchd can write there)
-assert_pattern_present "$WEB_MAC" 'mkdir -p /var/log/homebrew' \
-    "60-web-stack/install.mac.sh — creates /var/log/homebrew/ before pointing plists at it"
-
-# Re-applies the change to launchd via bootout + bootstrap
-assert_pattern_present "$WEB_MAC" 'launchctl bootout .system/homebrew\.mxcl' \
-    "60-web-stack/install.mac.sh — bootouts each modified daemon to flush in-memory state"
-assert_pattern_present "$WEB_MAC" 'launchctl bootstrap system' \
-    "60-web-stack/install.mac.sh — re-bootstraps each modified daemon"
-
-# Covers all 3 services that valet install spawns (loop-based, robust to refactor)
-assert_pattern_present "$WEB_MAC" 'for svc in php nginx dnsmasq' \
-    "60-web-stack/install.mac.sh — iterates over php / nginx / dnsmasq services"
-
-# Idempotence guard: per-service change-tracking flag + read-before-write check.
-assert_pattern_present "$WEB_MAC" '(_hardening_changed=|changed=0|needs_edit=0)' \
-    "60-web-stack/install.mac.sh — tracks whether each plist needs an edit (idempotence)"
-
-# UX honesty: distinguish 'no plists found' from 'all plists already hardened'.
-# The variable was renamed in the engine migration; the invariant (a found-counter
-# exists separate from the changed-counter) holds.
-assert_pattern_present "$WEB_MAC" '(_plist_found=|found=0)' \
-    "60-web-stack/install.mac.sh — tracks whether any plist was found (UX honesty)"
-assert_pattern_present "$WEB_MAC" '(FORCE_VALET_INSTALL=1.*to .re.create the web stack|standard brew prefix — no-op)' \
-    "60-web-stack/install.mac.sh — points user to FORCE_VALET_INSTALL=1 when no plists found"
-
-# Negative: no NEW absolute reference to /Volumes/External/homebrew/var/
-# (only the comment that explains the bug may mention the phantom path)
-non_comment_volumes_paths="$(grep -nE '^[^#]*StandardErrorPath.*"/Volumes/' "$WEB_MAC" || true)"
-if [[ -z "$non_comment_volumes_paths" ]]; then
-    pass "60-web-stack/install.mac.sh — no executable code writes Standard*Path to /Volumes/*"
-else
-    fail "60-web-stack/install.mac.sh — found Standard*Path → /Volumes/* in non-comment line: $non_comment_volumes_paths"
-fi
 
 echo
 echo "═══ lib/detect-brew.sh — glob fallback for mount-point disambiguation ═══"

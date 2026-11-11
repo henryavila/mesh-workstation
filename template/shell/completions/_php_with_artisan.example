@@ -1,4 +1,0 @@
-#compdef php
-# Zsh completion wrapper: delegates to _php normally,
-# but switches to _artisan when the command line is `php artisan ...`.
-# See shell/completions/_artisan for the artisan-specific logic.

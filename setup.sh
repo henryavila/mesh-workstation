@@ -141,7 +141,6 @@ emit_lean_bootstrap_selections() {
         shell-terminal/cli-tools \
         shell-terminal/zsh \
         shell-terminal/fonts \
-        languages/node \
         personal/personal
 }
 
@@ -530,14 +529,13 @@ if should_run_menu; then
         # Menu not built / Node missing / crashed — do NOT flip NON_INTERACTIVE.
         # That flag means the operator asked for headless; missing Node must not
         # block personal identity TTY prompts. Use a lean bootstrap selection
-        # (foundation + shell + node + personal) instead of the full default-on
-        # fleet so virgin machines get Node/PATH without surprise DB/web installs.
-        warn "interactive bundle menu unavailable — using lean bootstrap selection (foundation/shell/node/personal)"
+        # (foundation + shell + personal) instead of the full default-on fleet.
+        warn "interactive bundle menu unavailable — using lean bootstrap selection (foundation/shell/personal)"
         warn "re-run bash setup.sh after Node is on PATH to open the full Blink menu"
         MESH_LEAN_BOOTSTRAP=1; export MESH_LEAN_BOOTSTRAP
         # selections.list is only rewritten when absent. A stale/synced file would
-        # keep MESH_LEAN_BOOTSTRAP inert and skip languages/node. When Node itself
-        # is missing, clear it so lean bootstrap actually runs.
+        # keep MESH_LEAN_BOOTSTRAP inert. When Node itself is missing, clear it
+        # so lean bootstrap actually runs.
         if ! command -v node >/dev/null 2>&1; then
             rm -f "$SELECTIONS_FILE"
         fi

@@ -33,15 +33,6 @@ async function main() {
     return;
   }
 
-  // `services` subcommand → the interactive `mesh services` flow (filter list →
-  // context-aware action). scripts/runners/services.sh feeds porcelain rows and
-  // reads `<id>\t<verb>` back, then dispatches the driver.
-  if (argv[0] === 'services') {
-    const { servicesMain } = await import('./services-main.js');
-    await servicesMain(argv.slice(1));
-    return;
-  }
-
   // `help` subcommand → the interactive `mesh help` browser. The shell runner
   // feeds command metadata plus precomputed `mesh <cmd> --help` text.
   if (argv[0] === 'help') {

@@ -197,15 +197,4 @@ assert_file_exists "$SENT/php-verified-after-repair" "PHP was re-verified after 
 assert_eq "$(printf '%s\n' "$order" | sed -n '1p')" "php-repair" "PHP repair runs before Valet install"
 assert_eq "$(printf '%s\n' "$order" | sed -n '2p')" "valet-install" "Valet install runs after PHP repair"
 
-echo
-echo "real WSL bundle closure orders languages/php before web/nginx-php-fpm"
-real_wsl_closure="$(bash "$ENGINE" --topics-dir "$WS/topics" --platform wsl \
-    --bundle web/nginx-php-fpm --print-closure 2>"$ROOT/real-wsl-closure.err")"
-wsl_php_pos="$(printf '%s\n' "$real_wsl_closure" | awk '$0 == "languages/php" { print NR; exit }')"
-wsl_web_pos="$(printf '%s\n' "$real_wsl_closure" | awk '$0 == "web/nginx-php-fpm" { print NR; exit }')"
-assert_ne "$wsl_php_pos" "" "real web/nginx-php-fpm closure includes languages/php"
-assert_ne "$wsl_web_pos" "" "real WSL closure includes web/nginx-php-fpm"
-ASSERT_MSG="real WSL closure places languages/php before web/nginx-php-fpm" \
-    assert_true "[ '${wsl_php_pos:-0}' -gt 0 ] && [ '${wsl_php_pos:-0}' -lt '${wsl_web_pos:-0}' ]"
-
 summary

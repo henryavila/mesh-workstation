@@ -19,8 +19,6 @@ SCRIPTS=(
     "$WS/topics/shell-terminal/wsl/install-rust-bins.sh"
     "$WS/topics/shell-terminal/wsl/install-atuin.sh"
     "$WS/topics/shell-terminal/install-zinit.sh"
-    "$WS/topics/web/wsl/mkcert.sh"
-    "$WS/topics/web/scripts/install-mailpit.sh"
     "$WS/topics/ai/install-rtk.sh"
 )
 
@@ -48,15 +46,6 @@ for script in "${SCRIPTS[@]}"; do
     assert "$rel: has --max-time 45" "yes" \
         "$(grep -qE -- '--max-time[[:space:]]+45' "$script" && echo yes || echo no)"
 done
-
-# mkcert rollback must best-effort remove the known binary path (Issue 8).
-MKCERT="$WS/topics/web/wsl/mkcert.sh"
-assert "mkcert: rollback removes MKCERT_BIN / marker" "yes" \
-    "$(grep -q 'MKCERT_BIN_MARKER' "$MKCERT" \
-        && grep -q 'sudo rm -f "\$MKCERT_BIN"' "$MKCERT" \
-        && echo yes || echo no)"
-assert "mkcert: rollback has no mkcert -uninstall" "yes" \
-    "$(grep -qE 'mkcert[[:space:]]+-uninstall' "$MKCERT" && echo no || echo yes)"
 
 echo
 echo "Passed: $passed  Failed: $failed"

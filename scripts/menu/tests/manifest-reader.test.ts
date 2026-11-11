@@ -78,13 +78,13 @@ describe('filterByPlatform', () => {
   const topics = readAllManifests();
   it('mac keeps mac+universal bundles, drops wsl-only', () => {
     const mac = flattenBundles(filterByPlatform(topics, 'mac')).map((r) => r.key);
-    expect(mac).toContain('web/valet');
-    expect(mac).not.toContain('web/nginx-php-fpm');
+    expect(mac).toContain('remote-access/code-server');
+    expect(mac).toContain('foundation/base');
   });
-  it('wsl keeps wsl bundles', () => {
+  it('wsl keeps universal bundles and drops mac-only ones', () => {
     const wsl = flattenBundles(filterByPlatform(topics, 'wsl')).map((r) => r.key);
-    expect(wsl).toContain('web/nginx-php-fpm');
-    expect(wsl).not.toContain('web/valet');
+    expect(wsl).toContain('foundation/base');
+    expect(wsl).not.toContain('remote-access/code-server');
   });
 });
 

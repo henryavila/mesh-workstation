@@ -47,43 +47,6 @@ assert_contains "$preview_out" "serve:Serve requests" \
 assert_contains "$preview_out" "DOC doctool serve --help" \
     "fzf-tab preview executes subcommand --help"
 
-mkdir -p "$TESTROOT/project" "$TESTROOT/bin"
-touch "$TESTROOT/project/artisan"
-chmod +x "$TESTROOT/project/artisan"
-cat > "$TESTROOT/bin/php" <<'PHP'
-#!/usr/bin/env bash
-if [ "$1" = "./artisan" ] && [ "$2" = "list" ] && [ "$3" = "--raw" ]; then
-    printf '%s\n' \
-        'cache:clear Flush the application cache' \
-        'route:list List all registered routes'
-    exit 0
-fi
-exit 1
-PHP
-chmod +x "$TESTROOT/bin/php"
-
-artisan_out="$(
-    PATH="$TESTROOT/bin:$PATH" zsh -fic "
-        cd '$TESTROOT/project' || exit 1
-        autoload -Uz compinit
-        compinit -i
-        _php() { print -r -- PHP_FALLBACK_CALLED }
-        _describe() {
-            local array_name=\"\${@[-1]}\"
-            print -rl -- \"\${(@P)array_name}\"
-        }
-        source '$REPO_ROOT/topics/web/templates/serve/zshrc.d-60-web-stack.sh'
-        words=(art '')
-        CURRENT=2
-        _dev_bootstrap_artisan_completion
-    " 2>/dev/null
-)"
-
-assert_contains "$artisan_out" 'cache\:clear:Flush the application cache' \
-    "artisan completion preserves namespaces and descriptions"
-assert_contains "$artisan_out" 'route\:list:List all registered routes' \
-    "artisan completion includes route list description"
-
 git_alias_out="$(
     zsh -fic "
         autoload -Uz compinit

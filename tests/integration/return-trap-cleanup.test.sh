@@ -52,8 +52,6 @@ out="$(bash "$ROOT/fixed.sh" 2>&1)"; rc=$?
 
 # ── B. static: every leak-prone site disarms its RETURN trap ──
 for f in \
-    topics/databases/wsl/mysql.sh \
-    topics/databases/mac/mysql.sh \
     scripts/lib/installers/github-release.sh \
     scripts/lib/pecl-install.sh; do
     if grep -qE "trap - RETURN' RETURN" "$WS/$f"; then
