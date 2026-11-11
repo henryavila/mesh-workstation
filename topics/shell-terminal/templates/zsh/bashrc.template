@@ -74,3 +74,9 @@ fi
 # ---------- Local overrides (never versioned) ----------
 # shellcheck source=/dev/null
 [ -f "$HOME/.bashrc.local" ] && . "$HOME/.bashrc.local"
+
+# Hand off only after the local file. An exec inside the fragment loop
+# skips ~/.bashrc.local, and the zsh process never sees its exports.
+if command -v mesh_zsh_handoff >/dev/null 2>&1; then
+    mesh_zsh_handoff
+fi
