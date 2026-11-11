@@ -24,7 +24,7 @@
 #   NO_COLOR=1            disable colored output (auto if not a TTY)
 #
 # Usage: bash setup.sh [--help] [--non-interactive] [--dry-run] [--list-bundles]
-#                      [--no-mesh] [--bundle topic/bundle]...
+#                      [--server] [--no-mesh] [--bundle topic/bundle]...
 set -euo pipefail
 
 # Minimal shells (docker run, `su -`, env -i) leave $USER unset even with a real
@@ -42,6 +42,7 @@ DRY_RUN="${DRY_RUN:-0}"
 LIST_BUNDLES=0
 REPAIR_MODE=0
 ADOPT_MODE=0
+MESH_PROFILE="${MESH_PROFILE:-workstation}"
 CLI_BUNDLES=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -49,6 +50,11 @@ while [[ $# -gt 0 ]]; do
         --non-interactive) NON_INTERACTIVE=1; shift ;;
         --dry-run)         DRY_RUN=1; shift ;;
         --list-bundles)    LIST_BUNDLES=1; shift ;;
+        --server)
+            MESH_PROFILE=server
+            NON_INTERACTIVE=1
+            shift
+            ;;
         --no-mesh)
             MESH_NO_MESH=1
             export MESH_NO_MESH
@@ -83,12 +89,14 @@ done
 if [[ "$ADOPT_MODE" == "1" && "$REPAIR_MODE" == "1" ]]; then
     echo "setup.sh: --adopt and --repair are mutually exclusive" >&2; exit 64
 fi
-export NON_INTERACTIVE DRY_RUN
+export NON_INTERACTIVE DRY_RUN MESH_PROFILE
 
 # shellcheck disable=SC1091
 source "$HERE/scripts/lib/log.sh"
 # shellcheck disable=SC1091
 source "$HERE/scripts/lib/no-mesh.sh"
+# shellcheck disable=SC1091
+source "$HERE/scripts/lib/dx-profiles.sh"
 
 usage() {
     cat <<'EOF'
@@ -103,6 +111,7 @@ Automation / CI mode:
   DRY_RUN=1 bash setup.sh           print what the engine would do, don't execute
   bash setup.sh --dry-run           same, flag form
   bash setup.sh --list-bundles      list every topic/bundle + default selection
+  bash setup.sh --server            headless Linux DX (explicit; not auto-detected)
   bash setup.sh --no-mesh           omit membership: mesh bundles from the catalog
                                     (exports MESH_NO_MESH=1 before the menu);
                                     headless default is foundation/base only
@@ -134,51 +143,25 @@ if [[ "${SHOW_HELP:-0}" == "1" ]]; then usage; exit 0; fi
 # see no_mesh_emit_lean_bootstrap. Headless `--non-interactive --no-mesh` does
 # not set MESH_LEAN_BOOTSTRAP and still emits only foundation/base.
 emit_lean_bootstrap_selections() {
-    printf '%s\n' \
-        foundation/base \
-        identity/identity \
-        git/config \
-        shell-terminal/cli-tools \
-        shell-terminal/zsh \
-        shell-terminal/fonts \
-        personal/personal
+    dx_profile_defaults
 }
 
 emit_default_selections() {
     # Menu-unavailable lean bootstrap must win over the no-mesh headless
     # default. Otherwise `bash setup.sh --no-mesh` on a virgin box (no Node)
-    # installs only foundation/base, never gets Node, and can never open the
-    # menu on a second run.
+    # installs only foundation/base and can never open the menu on a second run.
     if [[ "${MESH_LEAN_BOOTSTRAP:-0}" == "1" ]]; then
         if no_mesh_active; then
             no_mesh_emit_lean_bootstrap
         else
-            emit_lean_bootstrap_selections
+            dx_profile_defaults
         fi
         return 0
     fi
     if no_mesh_emit_default_or_bundles; then
         return 0
     fi
-    local mf topic vf
-    for mf in "$HERE"/topics/*/manifest.yaml; do
-        [[ -f "$mf" ]] || continue
-        topic="$(basename "$(dirname "$mf")")"
-        vf="$(bash "$HERE/scripts/lib/yaml-parse.sh" < "$mf" 2>/dev/null)" || continue
-        (
-            eval "$vf"
-            [[ "${__YAML_PARSE_OK:-0}" == "1" ]] || exit 0
-            local n="${BUNDLE_COUNT:-0}" i name_v ds_v req_v name ds req
-            for ((i=0; i<n; i++)); do
-                name_v="BUNDLE_${i}_NAME"; ds_v="BUNDLE_${i}_DEFAULT_SELECTED"; req_v="BUNDLE_${i}_REQUIRED"
-                name="${!name_v:-}"; ds="${!ds_v:-1}"; req="${!req_v:-0}"
-                [[ -n "$name" ]] || continue
-                if [[ "$req" == "1" || "$ds" != "0" ]]; then
-                    printf '%s/%s\n' "$topic" "$name"
-                fi
-            done
-        )
-    done
+    dx_profile_defaults
 }
 
 # Every bundle, ignoring required / default_selected. Used by --adopt so the
@@ -203,7 +186,36 @@ emit_all_selections() {
     done
 }
 
+# Abort before apply when the resolved ids contain a forbidden bundle or
+# both sides of a conflicts pair. Prints the bundle id. Mutates nothing.
+dx_guard_selection_args() {
+    no_mesh_active && return 0
+    local hit
+    if hit="$(dx_profile_conflict_hit "$@")"; then
+        printf 'setup.sh: conflict, refusing to apply both: %s\n' "$(printf '%s' "$hit" | tr '\n' ' ')" >&2
+        exit 1
+    fi
+    if hit="$(dx_profile_first_forbidden "$@")"; then
+        printf 'setup.sh: forbidden bundle for %s profile: %s\n' "$(dx_profile_name)" "$hit" >&2
+        exit 1
+    fi
+}
+
+dx_guard_selection_file() {
+    local file="$1" line ids=()
+    [[ -f "$file" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+        ids+=("$line")
+    done < "$file"
+    dx_guard_selection_args ${ids[@]+"${ids[@]}"}
+}
+
 if [[ "$LIST_BUNDLES" == "1" ]]; then
+    DX_PROFILE_DEFAULTS=""
+    if ! no_mesh_active; then
+        DX_PROFILE_DEFAULTS="$(dx_profile_defaults)"
+    fi
     # topic/bundle  [default|opt-out]
     for mf in "$HERE"/topics/*/manifest.yaml; do
         [[ -f "$mf" ]] || continue
@@ -220,20 +232,30 @@ if [[ "$LIST_BUNDLES" == "1" ]]; then
                 mem="${!mem_v:-}"
                 [[ -n "$name" ]] || continue
                 no_mesh_omit_bundle "$mem" && continue
-                # Under --no-mesh the unlock list loses required locks and starts
-                # unchecked (mirrors applyNoMeshUnlocks in the Blink menu).
-                if no_mesh_is_unlock_key "$topic/$name"; then
-                    req=0
-                    ds=0
+                if no_mesh_active; then
+                    # Under --no-mesh the unlock list loses required locks and starts
+                    # unchecked (mirrors applyNoMeshUnlocks in the Blink menu).
+                    if no_mesh_is_unlock_key "$topic/$name"; then
+                        req=0
+                        ds=0
+                    fi
+                    if [[ "$req" == "1" ]]; then mark="required"
+                    elif [[ "$ds" == "0" ]]; then mark="opt-in (default off)"
+                    else mark="default on"; fi
+                elif printf '%s\n' "$DX_PROFILE_DEFAULTS" | grep -qx "$topic/$name"; then
+                    mark="default on"
+                else
+                    mark="opt-in (default off)"
                 fi
-                if [[ "$req" == "1" ]]; then mark="required"
-                elif [[ "$ds" == "0" ]]; then mark="opt-in (default off)"
-                else mark="default on"; fi
                 printf '%-32s %s\n' "$topic/$name" "$mark"
             done
         )
     done
     exit 0
+fi
+
+if [[ "${#CLI_BUNDLES[@]}" -gt 0 ]]; then
+    dx_guard_selection_args "${CLI_BUNDLES[@]}"
 fi
 
 # ─── persistent state + secrets (sourced before the engine) ──────────────────
@@ -494,6 +516,55 @@ SELECTIONS_FILE="$SELECTIONS_DIR/selections.list"
 REMOVALS_FILE="$SELECTIONS_DIR/removals.list"
 MENU_DIR="$HERE/scripts/menu"
 
+# Private Node for the workstation menu only. Not a catalog bundle, not fnm,
+# and not exported from shell rc. --server forces non-interactive, so it
+# does not download. A dry-run does not download either.
+ensure_menu_node() {
+    [[ "$(dx_profile_name)" == "workstation" ]] || return 0
+    [[ "${NON_INTERACTIVE:-0}" == "1" ]] && return 0
+    [[ "${DRY_RUN:-0}" == "1" ]] && return 0
+    command -v node >/dev/null 2>&1 && return 0
+    local dest="$HOME/.local/share/mesh/menu-node"
+    if [[ -x "$dest/bin/node" ]]; then
+        export PATH="$dest/bin:$PATH"
+        return 0
+    fi
+    command -v curl >/dev/null 2>&1 || return 0
+    command -v python3 >/dev/null 2>&1 || return 0
+    local ver arch osname tar url tmp
+    ver="$(curl -fsSL --connect-timeout 8 --max-time 30 https://nodejs.org/dist/index.json \
+        | python3 -c 'import json,sys
+rels=json.load(sys.stdin)
+for r in rels:
+    if r.get("lts"):
+        print(r["version"])
+        break')" || return 0
+    [[ -n "$ver" ]] || return 0
+    case "$(uname -s)" in
+        Linux) osname=linux ;;
+        Darwin) osname=darwin ;;
+        *) return 0 ;;
+    esac
+    case "$(uname -m)" in
+        x86_64|amd64) arch=x64 ;;
+        aarch64|arm64) arch=arm64 ;;
+        *) return 0 ;;
+    esac
+    tar="node-${ver}-${osname}-${arch}.tar.gz"
+    url="https://nodejs.org/dist/${ver}/${tar}"
+    tmp="$(mktemp -d)"
+    if ! curl -fsSL --connect-timeout 8 --max-time 120 -o "$tmp/node.tgz" "$url"; then
+        rm -rf "$tmp"
+        return 0
+    fi
+    tar -xzf "$tmp/node.tgz" -C "$tmp" || { rm -rf "$tmp"; return 0; }
+    rm -rf "$dest"
+    mkdir -p "$(dirname "$dest")"
+    mv "$tmp"/node-* "$dest"
+    rm -rf "$tmp"
+    export PATH="$dest/bin:$PATH"
+}
+
 run_menu_if_available() {
     # Propagates the menu's exit status so the caller can tell apart:
     #   0   = applied (wrote selections.list)         → use the selection
@@ -501,6 +572,7 @@ run_menu_if_available() {
     #   2   = menu not present / Node missing          → fall back to default
     #   *   = no TTY (app.tsx) / crashed               → fall back to default
     [[ -f "$MENU_DIR/index.js" || -f "$MENU_DIR/dist/index.js" ]] || return 2
+    ensure_menu_node
     command -v node >/dev/null 2>&1 || { warn "Node.js not found — cannot run the setup menu"; return 2; }
     info "launching the bundle menu…"
     # Dependency provisioning lives in the launcher (scripts/menu/index.js), not
@@ -716,6 +788,10 @@ if [[ -n "${SKIP_TOPICS:-}" ]]; then
 fi
 
 info "selections: $SELECTIONS_FILE"
+dx_guard_selection_file "$SELECTIONS_FILE"
+if [[ "$DRY_RUN" == "1" ]]; then
+    grep -vE '^[[:space:]]*(#|$)' "$SELECTIONS_FILE" || true
+fi
 
 # ─── apply via the engine ────────────────────────────────────────────────────
 LOG="/tmp/mesh-workstation-$OS-$(date +%Y%m%d-%H%M%S).log"

@@ -11,6 +11,7 @@
  * run — see applyNoMeshCatalog / NO_MESH_UNLOCK_KEYS.
  */
 import { closeRequires } from './delta.js';
+import { workstationDefaultKeys } from './dx-profiles.js';
 import { flattenBundles } from './manifest-reader.js';
 import { readSelections } from './selections-io.js';
 import { selectionsFile } from './paths.js';
@@ -87,11 +88,12 @@ export function applyNoMeshCatalog(
   return { topics: rebuilt, refs };
 }
 
-/** Fresh-install default: required, or anything not explicitly default_selected:false. */
+/** Fresh-install default: the workstation column in dx-profiles.yaml. */
 export function defaultSelected(refs: BundleRef[]): Set<string> {
+  const column = workstationDefaultKeys();
   const sel = new Set<string>();
   for (const r of refs) {
-    if (r.bundle.required || r.bundle.default_selected !== false) sel.add(r.key);
+    if (column.has(r.key)) sel.add(r.key);
   }
   return sel;
 }

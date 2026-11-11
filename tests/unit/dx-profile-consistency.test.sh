@@ -341,17 +341,181 @@ removed_commands() {
     fi
 }
 
-# on in F2
-profiles() { dx_skip "profiles" "F2"; }
+_dx_marked_defaults() {
+    # setup.sh --list-bundles rows: "<id><padding> default on"
+    awk '$2 == "default" && $3 == "on" { print $1 }' | LC_ALL=C sort
+}
+
+_dx_sorted_section() {
+    dx_section "$1" | LC_ALL=C sort
+}
 
 # on in F2
-conflicts() { dx_skip "conflicts" "F2"; }
+profiles() {
+    local parsed out got expected home rc
+    parsed="$(bash "$PARSER" < "$CONTRACT" 2>/dev/null)" || {
+        fail "profiles could not parse the contract"
+        return
+    }
+    eval "$parsed"
+    out="$(bash "$WS/setup.sh" --list-bundles 2>&1)" || {
+        fail "unflagged --list-bundles failed"
+        return
+    }
+    got="$(printf '%s\n' "$out" | _dx_marked_defaults)"
+    expected="$(_dx_sorted_section workstation-default)"
+    if [[ "$got" == "$expected" ]]; then
+        pass "unflagged --list-bundles defaults match the workstation column"
+    else
+        fail "unflagged --list-bundles defaults drifted"
+        printf '      expected:\n%s\n      actual:\n%s\n' "$expected" "$got" >&2
+    fi
+
+    out="$(bash "$WS/setup.sh" --server --list-bundles 2>&1)" || {
+        fail "--server --list-bundles failed"
+        return
+    }
+    got="$(printf '%s\n' "$out" | _dx_marked_defaults)"
+    expected="$(_dx_sorted_section server-default)"
+    if [[ "$got" == "$expected" ]]; then
+        pass "--server --list-bundles defaults match the server column"
+    else
+        fail "--server --list-bundles defaults drifted"
+        printf '      expected:\n%s\n      actual:\n%s\n' "$expected" "$got" >&2
+    fi
+
+    home="$(mktemp -d)"
+    out="$(
+        HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_STATE_HOME="$home/.local/state" \
+            bash "$WS/setup.sh" --server --dry-run --non-interactive --bundle apps/flyenv 2>&1
+    )" && rc=0 || rc=$?
+    rm -rf "$home"
+    if [[ "$rc" -ne 0 ]] && printf '%s\n' "$out" | grep -q 'apps/flyenv'; then
+        pass "server --bundle apps/flyenv aborts and names the bundle"
+    else
+        fail "server --bundle apps/flyenv did not abort (rc=$rc)"
+        printf '%s\n' "$out" >&2
+    fi
+
+    home="$(mktemp -d)"
+    out="$(
+        HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_STATE_HOME="$home/.local/state" \
+            bash "$WS/setup.sh" --dry-run --non-interactive 2>&1
+    )" && rc=0 || rc=$?
+    rm -rf "$home"
+    if printf '%s\n' "$out" | grep -qx 'apps/flyenv' \
+        && printf '%s\n' "$out" | grep -qx 'apps/herdr-app' \
+        && ! printf '%s\n' "$out" | grep -qx 'languages/php' \
+        && ! printf '%s\n' "$out" | grep -qx 'personal/personal'; then
+        pass "unflagged dry-run lists FlyEnv and herdr-app, not php or personal"
+    else
+        fail "unflagged dry-run selection drifted (rc=$rc)"
+        printf '%s\n' "$out" >&2
+    fi
+}
 
 # on in F2
-linux_platform() { dx_skip "linux-platform" "F2"; }
+conflicts() {
+    local home out rc
+    home="$(mktemp -d)"
+    out="$(
+        HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_STATE_HOME="$home/.local/state" \
+            bash "$WS/setup.sh" --dry-run --non-interactive \
+                --bundle apps/flyenv --bundle apps/flock 2>&1
+    )" && rc=0 || rc=$?
+    rm -rf "$home"
+    if [[ "$rc" -ne 0 ]] && printf '%s\n' "$out" | grep -q 'apps/flyenv' \
+        && printf '%s\n' "$out" | grep -q 'apps/flock'; then
+        pass "FlyEnv and Flock together abort before apply"
+    else
+        fail "FlyEnv and Flock both survived closure (rc=$rc)"
+        printf '%s\n' "$out" >&2
+    fi
+}
 
 # on in F2
-menu_node() { dx_skip "menu-node" "F2"; }
+linux_platform() {
+    local parsed id topic bundle mf body found item_platforms
+    parsed="$(bash "$PARSER" < "$CONTRACT" 2>/dev/null)" || {
+        fail "linux-platform could not parse the contract"
+        return
+    }
+    eval "$parsed"
+    local missing=0
+    while IFS= read -r id; do
+        [[ -n "$id" ]] || continue
+        topic="${id%%/*}"
+        bundle="${id#*/}"
+        mf="$WS/topics/$topic/manifest.yaml"
+        if [[ ! -f "$mf" ]]; then
+            fail "server-default bundle has no manifest: $id"
+            missing=1
+            continue
+        fi
+        body="$(bash "$PARSER" < "$mf" 2>/dev/null)" || {
+            fail "could not parse $mf"
+            missing=1
+            continue
+        }
+        found="$(
+            eval "$body"
+            i=0
+            while [[ "$i" -lt "${BUNDLE_COUNT:-0}" ]]; do
+                name_v="BUNDLE_${i}_NAME"
+                [[ "${!name_v:-}" == "$bundle" ]] || { i=$((i + 1)); continue; }
+                items="${BUNDLE_COUNT:-0}"
+                ic_v="BUNDLE_${i}_ITEM_COUNT"
+                ic="${!ic_v:-0}"
+                j=0
+                while [[ "$j" -lt "$ic" ]]; do
+                    pc_v="BUNDLE_${i}_ITEM_${j}_PLATFORMS_COUNT"
+                    pc="${!pc_v:-0}"
+                    k=0
+                    while [[ "$k" -lt "$pc" ]]; do
+                        pv="BUNDLE_${i}_ITEM_${j}_PLATFORMS_${k}"
+                        if [[ "${!pv:-}" == "linux" ]]; then
+                            printf 'yes\n'
+                            exit 0
+                        fi
+                        k=$((k + 1))
+                    done
+                    j=$((j + 1))
+                done
+                i=$((i + 1))
+            done
+            exit 1
+        )" || found=""
+        if [[ "$found" == "yes" ]]; then
+            pass "$id has a linux platform item"
+        else
+            fail "$id has no item with platform linux"
+            missing=1
+        fi
+    done <<EOF
+$(dx_section server-default)
+EOF
+    [[ "$missing" -eq 0 ]] || return 0
+}
+
+# on in F2
+menu_node() {
+    local hit
+    hit="$(grep -R -n -E 'export[[:space:]]+(FNM_|PATH=.*fnm)|~/.npm-global|NPM_CONFIG_PREFIX' \
+        "$WS/topics" "$WS/template" --include='*.sh' --include='*.zsh' --include='*.template' 2>/dev/null || true)"
+    if [[ -z "$hit" ]]; then
+        pass "no shell fragment exports fnm or ~/.npm-global"
+    else
+        fail "shell fragment exports a menu runtime"
+        printf '%s\n' "$hit" >&2
+    fi
+    if grep -q 'menu-node' "$WS/setup.sh" \
+        && grep -q 'NON_INTERACTIVE' "$WS/setup.sh" \
+        && grep -A 40 'ensure_menu_node()' "$WS/setup.sh" | grep -q 'workstation'; then
+        pass "menu node is private to the interactive workstation menu"
+    else
+        fail "ensure_menu_node is missing the workstation and non-interactive guards"
+    fi
+}
 
 # on in F3
 identity_gate() { dx_skip "identity-gate" "F3"; }

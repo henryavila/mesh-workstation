@@ -13,22 +13,22 @@ INIT_TS="$WS/scripts/menu/src/core/init.ts"
 assert_file_exists "$SETUP" "setup.sh exists"
 assert_file_exists "$INIT_TS" "init.ts exists"
 
-# Unflagged --list-bundles still shows personal + identity as required.
+# Unflagged --list-bundles follows the workstation column, not identity.
 unflagged=""
 unflagged_rc=0
 unflagged=$(bash "$SETUP" --list-bundles 2>&1) || unflagged_rc=$?
 assert_eq "$unflagged_rc" "0" "unflagged --list-bundles exits 0"
-assert_contains "$unflagged" "personal/personal" "unflagged lists personal/personal"
-assert_contains "$unflagged" "identity/identity" "unflagged lists identity/identity"
-
+assert_contains "$unflagged" "apps/flyenv" "unflagged lists FlyEnv"
+assert_contains "$unflagged" "apps/herdr-app" "unflagged lists herdr-app"
+fly_line="$(printf '%s\n' "$unflagged" | grep -E '^apps/flyenv\b' || true)"
+assert_contains "$fly_line" "default on" "FlyEnv is a workstation default"
 pers_line="$(printf '%s\n' "$unflagged" | grep -E '^personal/personal\b' || true)"
-id_line="$(printf '%s\n' "$unflagged" | grep -E '^identity/identity\b' || true)"
-assert_contains "$pers_line" "required" "personal/personal is marked required when unflagged"
-assert_contains "$id_line" "required" "identity/identity is marked required when unflagged"
+assert_not_contains "$pers_line" "default on" "personal is not a workstation default"
+assert_not_contains "$pers_line" "required" "personal is not required when unflagged"
 
-# Menu helpers: unflagged requiredKeys still include personal + identity.
+# Menu helpers: identity and personal are no longer required locks.
 menu_probe="$(
-    cd "$WS/scripts/menu" && npx vitest run tests/no-mesh-menu.test.ts -t 'still locks personal' 2>&1
+    cd "$WS/scripts/menu" && npx vitest run tests/no-mesh-menu.test.ts -t 'does not lock personal' 2>&1
 )" || menu_rc=$?
 menu_rc="${menu_rc:-0}"
 assert_eq "$menu_rc" "0" "unflagged menu requiredKeys test exits 0"

@@ -14,7 +14,8 @@ bundles:
   - name: identity
     label: "GitHub identity"
     desc: "gh CLI + SSH key + GitHub auth"
-    required: true
+    required: false
+    default_selected: false
     membership: mesh
     icon_name: github
     items:

@@ -14,6 +14,7 @@ bundles:
   - name: syncthing
     label: "Syncthing"
     desc: "Syncthing P2P sync + device-pairing pause"
+    default_selected: false
     membership: mesh
     icon_name: sync
     items:

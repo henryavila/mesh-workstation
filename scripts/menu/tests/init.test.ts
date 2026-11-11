@@ -9,10 +9,14 @@ const refs = flattenBundles(readAllManifests());
 const index = indexByKey(refs);
 
 describe('defaultSelected', () => {
-  it('selects everything except default_selected:false (code-server, gpg-signing)', () => {
+  it('selects the workstation column, not identity or gpg-signing', () => {
     const sel = defaultSelected(refs);
     expect(sel.has('git/gpg-signing')).toBe(false);
     expect(sel.has('git/config')).toBe(true);
+    expect(sel.has('apps/flyenv')).toBe(true);
+    expect(sel.has('apps/herdr-app')).toBe(true);
+    expect(sel.has('identity/identity')).toBe(false);
+    expect(sel.has('personal/personal')).toBe(false);
   });
 });
 
@@ -28,13 +32,10 @@ describe('initialSelection', () => {
 
   it('re-run starts from the saved file, dropping stale keys, forcing required + closure', () => {
     const f = path.join(tmp(), 'selections.list');
-    writeFileSync(f, 'web/valet\nghost/none\n');
+    writeFileSync(f, 'git/lazygit\nghost/none\n');
     const { selected, fromSaved } = initialSelection(refs, index, f);
     expect(fromSaved).toBe(true);
-    expect(selected.has('web/valet')).toBe(true);
-    // closure pulled in valet's deps
-    expect(selected.has('databases/mysql')).toBe(true);
-    expect(selected.has('databases/redis')).toBe(true);
+    expect(selected.has('git/lazygit')).toBe(true);
     // stale key dropped
     expect(selected.has('ghost/none')).toBe(false);
     // required still forced in

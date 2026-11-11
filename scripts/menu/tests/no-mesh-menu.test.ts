@@ -51,9 +51,9 @@ describe('unflagged catalog (MESH_NO_MESH unset)', () => {
     }
   });
 
-  it('still locks personal and identity as required', () => {
-    expect(required.has('personal/personal')).toBe(true);
-    expect(required.has('identity/identity')).toBe(true);
+  it('does not lock personal and identity as required', () => {
+    expect(required.has('personal/personal')).toBe(false);
+    expect(required.has('identity/identity')).toBe(false);
     expect(required.has('foundation/base')).toBe(true);
     expect(required.has('git/config')).toBe(true);
     expect(required.has('shell-terminal/cli-tools')).toBe(true);

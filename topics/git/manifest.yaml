@@ -31,10 +31,12 @@ bundles:
       - name: gitconfig-apply
         type: custom
         script: ./gitconfig-apply.sh
+        platforms: [mac, wsl, linux]
         idempotent: true
       - name: shell-fragments
         type: deploy
         spec: ./templates/config
+        platforms: [mac, wsl, linux]
         idempotent: true
 
   - name: lazygit
@@ -45,6 +47,7 @@ bundles:
       - name: lazygit-default-config
         type: custom
         script: ./link-lazygit-config.sh
+        platforms: [mac, wsl, linux]
 
   - name: gpg-signing
     label: "GPG signing"

@@ -25,3 +25,7 @@ bundles:
         type: custom
         script: ./wsl/core.sh
         platforms: [wsl]
+      - name: core-linux
+        type: custom
+        script: ./linux/core.sh
+        platforms: [linux]

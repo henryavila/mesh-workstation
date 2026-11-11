@@ -1,0 +1,75 @@
+# yaml-language-server: $schema=../../schema/manifest.schema.json
+topic:
+  label: "Apps"
+  hint: "herdr, FlyEnv, optional Flock"
+  required: false
+  order: 80
+  description: |
+    Desktop and CLI apps that replace the retired language, database, and
+    web stacks. Install, verify, and uninstall only. Mesh does not start
+    or stop them.
+
+bundles:
+
+  - name: herdr
+    label: "herdr CLI"
+    desc: "herdr on PATH for mesh ai"
+    icon_name: terminal
+    items:
+      - name: herdr-mac
+        type: brew-formula
+        spec: herdr
+        platforms: [mac]
+      - name: herdr-linux
+        type: custom
+        script: ./install-herdr.sh
+        platforms: [linux, wsl]
+        idempotent: true
+
+  - name: herdr-app
+    label: "Herdr app"
+    desc: "Herdr desktop app. Does not replace the herdr CLI."
+    icon_name: terminal
+    items:
+      - name: herdr-app
+        type: custom
+        script: ./install-herdr-app.sh
+        platforms: [mac, linux, wsl]
+        idempotent: true
+
+  - name: flyenv
+    label: "FlyEnv"
+    desc: "FlyEnv local environment. Conflicts with Flock."
+    icon_name: package
+    items:
+      - name: flyenv-mac
+        type: brew-cask
+        spec: flyenv
+        platforms: [mac]
+      - name: flyenv-linux
+        type: custom
+        script: ./install-flyenv-linux.sh
+        platforms: [linux]
+        idempotent: true
+      - name: flyenv-wsl
+        type: custom
+        script: ./install-flyenv-wsl.sh
+        platforms: [wsl]
+        idempotent: true
+
+  - name: flock
+    label: "Flock"
+    desc: "Optional Flock. Unchecked. Conflicts with FlyEnv."
+    default_selected: false
+    icon_name: package
+    items:
+      - name: flock-mac
+        type: custom
+        script: ./install-flock-mac.sh
+        platforms: [mac]
+        idempotent: true
+      - name: flock-linux
+        type: custom
+        script: ./install-flock-linux.sh
+        platforms: [linux, wsl]
+        idempotent: true

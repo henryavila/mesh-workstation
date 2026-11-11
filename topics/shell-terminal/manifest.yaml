@@ -100,35 +100,35 @@ bundles:
       - name: fzf-wsl
         type: apt
         spec: fzf
-        platforms: [wsl]
+        platforms: [wsl, linux]
       - name: bat-wsl
         type: apt
         spec: bat
-        platforms: [wsl]
+        platforms: [wsl, linux]
       - name: eza-wsl
         type: apt
         spec: eza
-        platforms: [wsl]
+        platforms: [wsl, linux]
       - name: zoxide-wsl
         type: apt
         spec: zoxide
-        platforms: [wsl]
+        platforms: [wsl, linux]
       - name: ripgrep-wsl
         type: apt
         spec: ripgrep
-        platforms: [wsl]
+        platforms: [wsl, linux]
       - name: fd-find-wsl
         type: apt
         spec: fd-find
-        platforms: [wsl]
+        platforms: [wsl, linux]
       - name: btop-wsl
         type: apt
         spec: btop
-        platforms: [wsl]
+        platforms: [wsl, linux]
       - name: tealdeer-wsl
         type: apt
         spec: tealdeer
-        platforms: [wsl]
+        platforms: [wsl, linux]
       # Deploy bashrc.d/zshrc.d fzf fragments BEFORE CDN downloads so a hung
       # atuin/rust-bins install cannot leave fzf wired for bash-completion only.
       - name: shell-fragments
@@ -138,17 +138,17 @@ bundles:
       - name: starship-wsl
         type: custom
         script: ./wsl/install-starship.sh
-        platforms: [wsl]
+        platforms: [wsl, linux]
         soft_fail: true
       - name: lazygit-wsl
         type: custom
         script: ./wsl/install-lazygit.sh
-        platforms: [wsl]
+        platforms: [wsl, linux]
         soft_fail: true
       - name: yazi-wsl
         type: custom
         script: ./wsl/install-yazi.sh
-        platforms: [wsl]
+        platforms: [wsl, linux]
         soft_fail: true
       - name: yazi-config
         type: custom
@@ -165,12 +165,12 @@ bundles:
       - name: git-delta-wsl
         type: custom
         script: ./wsl/install-delta.sh
-        platforms: [wsl]
+        platforms: [wsl, linux]
         soft_fail: true
       - name: atuin-wsl
         type: custom
         script: ./wsl/install-atuin.sh
-        platforms: [wsl]
+        platforms: [wsl, linux]
         soft_fail: true
       - name: atuin-key-guidance
         type: custom
@@ -179,7 +179,7 @@ bundles:
       - name: rust-bins-wsl
         type: custom
         script: ./wsl/install-rust-bins.sh
-        platforms: [wsl]
+        platforms: [wsl, linux]
         soft_fail: true
       # macOS: dual-write pbcopy + OSC 52 when HERDR_ENV=1 so herdr --remote
       # clients receive agent/shell copies (Grok only uses native pbcopy on Mac).
@@ -200,7 +200,7 @@ bundles:
       - name: zsh-wsl
         type: apt
         spec: zsh
-        platforms: [wsl]
+        platforms: [wsl, linux]
       - name: zsh-completions-mac
         type: brew-formula
         spec: zsh-completions
@@ -220,11 +220,11 @@ bundles:
       - name: zsh-autosuggestions-wsl
         type: apt
         spec: zsh-autosuggestions
-        platforms: [wsl]
+        platforms: [wsl, linux]
       - name: zsh-syntax-highlighting-wsl
         type: apt
         spec: zsh-syntax-highlighting
-        platforms: [wsl]
+        platforms: [wsl, linux]
       - name: shell-bootstrap
         type: custom
         script: ./shell-bootstrap.sh
@@ -285,7 +285,7 @@ bundles:
       - name: tmux-wsl
         type: apt
         spec: tmux
-        platforms: [wsl]
+        platforms: [wsl, linux]
       - name: tpm-clone
         type: custom
         script: ./clone-tpm.sh
@@ -309,7 +309,7 @@ bundles:
       - name: neovim-wsl
         type: apt
         spec: neovim
-        platforms: [wsl]
+        platforms: [wsl, linux]
       - name: nvim-default-config
         type: custom
         script: ./link-nvim-config.sh
