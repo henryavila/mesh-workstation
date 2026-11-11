@@ -4,8 +4,9 @@
 
 check() {
     command -v ya >/dev/null 2>&1 || return 0
-    local flavor_dir="${XDG_CONFIG_HOME:-$HOME/.config}/yazi/flavors/catppuccin-mocha"
-    [[ -d "$flavor_dir" ]]
+    local flavors="${XDG_CONFIG_HOME:-$HOME/.config}/yazi/flavors"
+    # ya pkg add deploys the directory with the .yazi suffix.
+    [[ -d "$flavors/catppuccin-mocha.yazi" || -d "$flavors/catppuccin-mocha" ]]
 }
 
 install() {

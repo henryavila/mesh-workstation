@@ -18,23 +18,10 @@ reinstall_shell_bundles() {
         shell-terminal/fonts
 }
 
-# Return 0 when $1 must block apply (user-authored rc, no mesh marker).
-# Missing, empty, /etc/skel-identical, and mesh-marked files are not blocking.
+# Unmanaged rc files do not block apply. deploy.sh backs them up and
+# installs the managed file.
 reinstall_shell_rc_is_blocking() {
-    local dst="$1" skel_equiv
-    [[ -e "$dst" ]] || return 1
-    if [[ -e "$dst" && ! -f "$dst" ]]; then
-        return 0
-    fi
-    [[ -s "$dst" ]] || return 1
-    if [[ -d /etc/skel && "$dst" == "$HOME"/* ]]; then
-        skel_equiv="/etc/skel/${dst#"$HOME"/}"
-        if [[ -f "$skel_equiv" ]] && cmp -s "$dst" "$skel_equiv"; then
-            return 1
-        fi
-    fi
-    grep -qiE "managed by (mesh-workstation|dev-bootstrap)" "$dst" 2>/dev/null && return 1
-    return 0
+    return 1
 }
 
 reinstall_shell_rc_paths() {

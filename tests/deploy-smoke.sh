@@ -8,7 +8,7 @@
 #   1. .template files pass through envsubst with ${BREW_PREFIX} allowlist
 #      entry properly substituted on this machine.
 #   2. Destinations without the "managed by mesh-workstation" marker are
-#      refused (and the ALLOW_OVERWRITE_UNMANAGED escape hatch works).
+#      backed up and replaced. Extra lines land in the matching *.local file.
 #   3. Templates or DEPLOY entries with .local suffix are refused.
 #
 # Design: all fixtures live in a temp dir. $HOME is redirected to a fake
@@ -118,10 +118,10 @@ else
     fail_count=$((fail_count + 1))
 fi
 
-# ---------- Test 3: refuse overwrite of unmanaged file ----------
+# ---------- Test 3: backup and replace an unmanaged file ----------
 
 echo
-echo "Test 3: refuse overwrite of existing file without managed-by marker"
+echo "Test 3: unmanaged rc is backed up, replaced, and extra lines are preserved"
 fx3="$(new_fixture test3)"
 cat > "$fx3/templates/bashrc.template" <<'TPL'
 # ~/.bashrc — managed by mesh-workstation / test
@@ -137,21 +137,21 @@ USER
 
 unset ALLOW_OVERWRITE_UNMANAGED
 if bash "$DEPLOY_SH" "$fx3/templates" >"$fx3/log" 2>&1; then
-    echo "  ✗ expected deploy.sh to FAIL (no marker in existing file)"
-    fail_count=$((fail_count + 1))
-else
     rc=$?
-    assert "deploy.sh exited non-zero" "1" "$rc"
-    assert_file_contains "original .bashrc preserved" \
-        "$HOME/.bashrc" "User's handwritten .bashrc"
-    if grep -qF "no 'managed by mesh-workstation' marker" "$fx3/log"; then
-        echo "  ✓ refuse message emitted"
-        pass_count=$((pass_count + 1))
-    else
-        echo "  ✗ refuse message missing in log"
-        cat "$fx3/log"
-        fail_count=$((fail_count + 1))
-    fi
+    assert "deploy.sh exited zero" "0" "$rc"
+    assert_file_contains "managed file installed" \
+        "$HOME/.bashrc" "new_content=yes"
+    backup_count="$(ls "$HOME"/.bashrc.bak-* 2>/dev/null | wc -l | tr -d '[:space:]')"
+    assert "one backup created" "1" "$backup_count"
+    backup_file="$(ls "$HOME"/.bashrc.bak-* | head -1)"
+    assert_file_contains "backup keeps the previous file" \
+        "$backup_file" "User's handwritten .bashrc"
+    assert_file_contains "extra line preserved in bashrc.local" \
+        "$HOME/.bashrc.local" 'export PATH="/custom/path:$PATH"'
+else
+    echo "  ✗ deploy.sh failed on unmanaged .bashrc"
+    cat "$fx3/log"
+    fail_count=$((fail_count + 1))
 fi
 
 # ---------- Test 4: ALLOW_OVERWRITE_UNMANAGED escape hatch ----------

@@ -80,6 +80,18 @@ printf '%s' "$out" | grep -qi "LOCKED" && ok || no "offer-unlock locked+headless
 grep -q $'critical\x1f' "$FOLLOW" && ok || no "offer-unlock locked+headless records a critical follow-up"
 grep -qi "mesh secret unlock" "$FOLLOW" && ok || no "critical follow-up names mesh secret unlock"
 
+# --- shared image: locked secrets do not ask for the key and do not fail ---
+ID="$TMP/shared"; mkdir -p "$ID/secrets"
+printf 'version: 1\nintegrations:\n  moshi:\n    tier: 2\n    type: env-token\n    key: MOSHI_PAIRING_TOKEN\n' \
+    > "$ID/secrets/manifest.yaml"
+printf '\000GITCRYPT\000ciphertextblob' > "$ID/secrets/secrets.env"
+out="$(HOME="$FAKE_HOME" MESH_IDENTITY_DIR="$ID" MESH_SHARED_IMAGE=1 PATH="$PATH_SAFE" \
+    NON_INTERACTIVE=0 MESH_FOLLOWUP_FILE="$TMP/shared-follow" \
+    bash "$SECRET" offer-unlock 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && ok || no "shared image offer-unlock returns rc0 (got rc=$rc)"
+printf '%s' "$out" | grep -qi "Paste the git-crypt key" && no "shared image must not ask for the key" || ok
+printf '%s' "$out" | grep -qi "shared image" && ok || no "shared image explains that secrets stay locked"
+
 # --- help lists the verb used by setup.sh ---
 run --help 2>&1 | grep -q "offer-unlock" && ok || no "help lists offer-unlock"
 

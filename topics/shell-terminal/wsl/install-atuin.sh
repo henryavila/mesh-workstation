@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 # atuin lands in ~/.atuin/bin (official installer), which is NOT on the engine
 # item-subshell PATH on WSL — fall back to the absolute path so post-verify holds.
-check() { command -v atuin >/dev/null 2>&1 || [[ -x "$HOME/.atuin/bin/atuin" ]]; }
+# The shared WSL image must not carry personal shell history. Set
+# MESH_INSTALL_ATUIN=1 to install Atuin on a personal machine.
+_atuin_wanted() { [[ "${MESH_INSTALL_ATUIN:-0}" == "1" ]]; }
+
+check() {
+    _atuin_wanted || return 1
+    command -v atuin >/dev/null 2>&1 || [[ -x "$HOME/.atuin/bin/atuin" ]]
+}
 
 # The official atuin setup script UNCONDITIONALLY appends `eval "$(atuin init …)"`
 # to ~/.zshrc and ~/.bashrc (creating ~/.zshrc if absent) — there is no opt-out
@@ -21,6 +28,10 @@ check() { command -v atuin >/dev/null 2>&1 || [[ -x "$HOME/.atuin/bin/atuin" ]];
 # (~/.atuin/bin), its env shim, and ~/.bash-preexec.sh (which mesh's bash fragment
 # sources) are untouched — only the unsolicited rc edits are reverted.
 install() {
+    if ! _atuin_wanted; then
+        echo "[atuin-wsl] skipped — Atuin stores personal shell history and is not part of the shared WSL image." >&2
+        return 0
+    fi
     local _zsrc="$HOME/.zshrc" _bsrc="$HOME/.bashrc"
     local _zbak="" _bbak=""
     [[ -e "$_zsrc" ]] && { _zbak="$(mktemp)"; cp -p "$_zsrc" "$_zbak"; }
@@ -51,7 +62,10 @@ _atuin_restore_rc() {
     fi
 }
 
-verify()  { check; }
+verify() {
+    _atuin_wanted || return 0
+    check
+}
 repair() { install; }
 
 rollback() {

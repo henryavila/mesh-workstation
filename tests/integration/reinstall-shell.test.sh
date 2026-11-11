@@ -3,7 +3,7 @@
 #
 # Contract for `mesh reinstall shell`:
 #   - allowlist is the shell layer only (no PHP/web/db/docker/node)
-#   - unmanaged ~/.zshrc / ~/.bashrc is refused; engine is not invoked
+#   - unmanaged ~/.zshrc / ~/.bashrc does not block; deploy backs it up
 #   - empty / mesh-marked rc files are allowed
 #   - ~/.config/mesh/selections.list is never rewritten
 #   - engine is called as a normal apply (not --repair / --update / --adopt)
@@ -138,21 +138,18 @@ run_reinstall() {
 }
 
 echo
-echo "── unmanaged zshrc is refused; engine not invoked ──"
+echo "── unmanaged zshrc does not block; engine is invoked ──"
 printf '# oh-my-zsh leftover\nexport ZSH="$HOME/.oh-my-zsh"\n' > "$HOME_SANDBOX/.zshrc"
 : > "$TRACE"
 set +e
 refuse_out="$(run_reinstall shell 2>&1)"
 refuse_rc=$?
 set -e
-assert_ne "$refuse_rc" "0" "unmanaged zshrc exits non-zero"
-assert_contains "$refuse_out" "managed by mesh-workstation" "refuse names the missing marker"
-assert_contains "$refuse_out" "mv " "refuse prints the mv recovery command"
-assert_contains "$refuse_out" ".zshrc.unmanaged.bak" "refuse names the unmanaged backup"
-assert_contains "$refuse_out" "mesh reinstall shell" "refuse tells the operator to re-run"
-assert_false "[ -s '$TRACE' ]"
+assert_eq "$refuse_rc" "0" "unmanaged zshrc does not block reinstall"
+assert_contains "$refuse_out" "shell-terminal/zsh" "reinstall lists the zsh bundle"
+assert_true "grep -q '^applied$' '$TRACE'"
 assert_eq "$(cat "$CFG/mesh/selections.list")" "$(cat "$SANDBOX/selections.before")" \
-    "refuse does not rewrite selections.list"
+    "reinstall does not rewrite selections.list"
 
 echo
 echo "── empty zshrc is unowned and may proceed ──"

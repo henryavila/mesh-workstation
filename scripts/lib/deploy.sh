@@ -15,6 +15,9 @@
 #   - Files with .template suffix pass through envsubst (requires gettext).
 #   - CRLF is stripped from template content.
 #   - Existing destination is diffed: no-op if identical, backup-then-overwrite otherwise.
+#   - An rc file without the mesh marker is backed up and replaced. Lines that
+#     are not in the distro skeleton and not in the new file are appended to
+#     the matching ~/.bashrc.local / ~/.zshrc.local.
 #   - Keeps the 5 most recent backups per destination, pruning older ones.
 #   - Destinations outside $HOME trigger sudo (confirmed once at start).
 
@@ -432,6 +435,42 @@ fi
 tmp_staging="$(mktemp -d)"
 trap 'rm -rf "$tmp_staging"' EXIT
 
+# Keep installer additions (FlyEnv PATH, tool blocks) when replacing an
+# unmanaged rc file. Distro skeleton lines and lines already in the new
+# file or in *.local are not copied.
+preserve_unmanaged_delta() {
+    local dst="$1" staged="$2"
+    local localf="${dst}.local"
+    local skel="" line tmp added=0
+    if [[ -d /etc/skel && "$dst" == "$HOME"/* ]]; then
+        skel="/etc/skel/${dst#"$HOME"/}"
+        [[ -f "$skel" ]] || skel=""
+    fi
+    tmp="$(mktemp)"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -n "${line//[[:space:]]/}" ]] || continue
+        if grep -qxF -e "$line" "$staged" 2>/dev/null; then
+            continue
+        fi
+        if [[ -n "$skel" ]] && grep -qxF -e "$line" "$skel" 2>/dev/null; then
+            continue
+        fi
+        if [[ -f "$localf" ]] && grep -qxF -e "$line" "$localf" 2>/dev/null; then
+            continue
+        fi
+        printf '%s\n' "$line" >> "$tmp"
+        added=1
+    done < "$dst"
+    if [[ "$added" -eq 1 ]]; then
+        {
+            printf '\n# preserved from unmanaged %s by mesh-workstation\n' "$(basename "$dst")"
+            cat "$tmp"
+        } >> "$localf"
+        info "preserved user lines from $dst → $localf"
+    fi
+    rm -f "$tmp"
+}
+
 deploy_one() {
     local src_rel="$1" dst="$2"
     local src_abs="$templates_dir/$src_rel"
@@ -469,13 +508,11 @@ deploy_one() {
             return 0
         fi
 
-        # Safety check: refuse to overwrite user-facing rc files that lack
-        # our 'managed by mesh-workstation' marker. Fragments in *.d/ dirs and
-        # scripts in .local/bin/ are considered bootstrap-owned by convention
-        # and skip the check. Escape hatch: ALLOW_OVERWRITE_UNMANAGED=1.
-        # Context: prevents the shell-terminal regression where a user's handcrafted
-        # .zshrc with a custom Homebrew block was overwritten by the template
-        # on first bootstrap run, silently losing the override.
+        # Rc files without the mesh marker used to be refused. They are now
+        # backed up and replaced. Extra lines are kept in the matching *.local
+        # file, which the managed rc sources last and mesh never overwrites.
+        # Fragments in *.d/ dirs and scripts in .local/bin/ skip that preserve
+        # step. ALLOW_OVERWRITE_UNMANAGED=1 remains accepted and is a no-op.
         local needs_header_check=1
         case "$dst" in
             */.bashrc.d/*|*/.zshrc.d/*|*/.local/bin/*)
@@ -514,19 +551,9 @@ deploy_one() {
 
         if [[ "$needs_header_check" == "1" ]] \
              && [[ "$looks_unowned" != "1" ]] \
-             && [[ "${ALLOW_OVERWRITE_UNMANAGED:-0}" != "1" ]] \
              && ! grep -qiE "managed by (mesh-workstation|dev-bootstrap)" "$dst" 2>/dev/null; then
-            # Persist the staged content so the user can diff it. tmp_staging/
-            # is cleared when deploy.sh exits; /tmp survives until reboot.
-            local inspect_path
-            inspect_path="/tmp/mesh-workstation-would-overwrite-$(basename "$dst")-$$"
-            cp "$staged" "$inspect_path" 2>/dev/null || true
-            fail "refusing to overwrite $dst — no 'managed by mesh-workstation' marker."
-            fail "This file has user-authored content. Options:"
-            fail "  1. Move custom blocks to ${dst}.local (never overwritten), delete $dst, re-run."
-            fail "  2. Review the template that would replace it:"
-            fail "       diff -u \"$dst\" \"$inspect_path\""
-            return 1
+            info "$dst has no mesh marker — backing it up and installing the managed file."
+            preserve_unmanaged_delta "$dst" "$staged"
         fi
 
         local ts

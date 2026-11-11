@@ -13,7 +13,11 @@
 # GITHUB_TOKEN). Mirrors the gpg-signing skip (4252d81): "cannot act here" is
 # not a failure. check() keeps its honest meaning; install()/verify() tolerate
 # the skip so a non-runnable headless run neither aborts nor false-succeeds.
+# shellcheck source=/dev/null
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../scripts/lib/shared-image.sh"
+
 _identity_runnable() {
+    mesh_shared_image && return 1
     [[ -n "${GITHUB_TOKEN:-}" ]] && return 0
     : </dev/tty >/dev/null 2>&1
 }
@@ -28,6 +32,10 @@ check() {
 }
 
 install() {
+    if mesh_shared_image; then
+        echo "identity: shared image — not creating a personal GitHub login or SSH key." >&2
+        return 0
+    fi
     if ! _identity_runnable; then
         echo "identity: no GITHUB_TOKEN and no /dev/tty — skipping identity setup;" \
              "run \`mesh setup\` interactively (or set GITHUB_TOKEN) to complete it" >&2

@@ -258,6 +258,9 @@ _secret_locked_count() {
     printf '%s' "$n"
 }
 
+# shellcheck source=/dev/null
+. "$LIB_DIR/shared-image.sh"
+
 secret_deploy() {
     _manifest_load || return 1
     # shellcheck source=/dev/null
@@ -269,7 +272,11 @@ secret_deploy() {
     # auto-installs git-crypt and decrypts the working tree in place).
     local locked
     locked="$(_secret_locked_count)"
-    if [ "$locked" -gt 0 ] && [ "${NON_INTERACTIVE:-0}" != "1" ] && [ -e /dev/tty ]; then
+    if mesh_shared_image; then
+        if [ "$locked" -gt 0 ]; then
+            warn "shared image — $locked replicated secret(s) stay locked. No personal key is stored here."
+        fi
+    elif [ "$locked" -gt 0 ] && [ "${NON_INTERACTIVE:-0}" != "1" ] && [ -e /dev/tty ]; then
         warn "This machine has $locked replicated secret(s) but the repo is LOCKED here."
         info "Paste the git-crypt key to configure them now (or press Enter to skip)."
         secret_unlock || warn "still locked — encrypted secrets will not be deployed"
@@ -296,6 +303,10 @@ secret_deploy() {
     # user sees an actionable banner instead of a silent green install.
     locked="$(_secret_locked_count)"
     if [ "$locked" -gt 0 ]; then
+        if mesh_shared_image; then
+            warn "shared image — $locked secret(s) left locked and were not deployed."
+            return 0
+        fi
         warn "──────────────────────────────────────────────────────────────"
         warn " $locked secret(s) NOT deployed — the repo is LOCKED on this machine."
         warn " Configure replication with your git-crypt key:"
@@ -332,6 +343,11 @@ secret_offer_unlock() {
         locked=$((locked + 1))
     fi
     [ "$locked" -gt 0 ] || return 0
+
+    if mesh_shared_image; then
+        warn "shared image — replicated secrets stay locked. No git-crypt key is requested."
+        return 0
+    fi
 
     if [ "${NON_INTERACTIVE:-0}" != "1" ] && [ -e /dev/tty ]; then
         warn "This machine has $locked replicated secret(s) but the identity repo is LOCKED here."

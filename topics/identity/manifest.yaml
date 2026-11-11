@@ -30,6 +30,9 @@ bundles:
         type: apt
         spec: wslu
         platforms: [wsl]
+        # Ubuntu 26.04 dropped wslu from the archive. Browser open is optional;
+        # a missing package must not abort GitHub CLI setup.
+        soft_fail: true
       - name: identity-setup
         type: custom
         script: ./identity-setup.sh

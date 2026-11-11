@@ -20,6 +20,9 @@ _mesh_source_if /usr/local/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 
 # fzf-tab (cloned by shell-terminal/zsh/fzf-tab). Direct source: do not wait
 # on zinit turbo, which never ran when ~/.zshrc.local was absent.
+# zsh's own menu takes TAB unless this is set. It has to be mesh-owned:
+# a machine without ~/.zshrc.local would otherwise keep the native menu.
+zstyle ':completion:*' menu no
 _mesh_source_if "$HOME/.local/share/fzf-tab/fzf-tab.plugin.zsh"
 
 # Powerlevel10k — clone is mesh-managed (~/.local/share/powerlevel10k).

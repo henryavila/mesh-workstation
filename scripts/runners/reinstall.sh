@@ -20,8 +20,8 @@ git aliases/lazygit) on an existing machine.
 
 Does:
   - normal engine apply of the shell allowlist (idempotent items run)
-  - refuse user-authored ~/.bashrc ~/.zshrc ~/.tmux.conf that lack the
-    'managed by mesh-workstation' marker (prints the exact recovery commands)
+  - back up ~/.bashrc ~/.zshrc ~/.tmux.conf that lack the mesh marker,
+    then install the managed file. Extra lines go to the matching *.local
 
 Does not:
   - rewrite ~/.config/mesh/selections.list
