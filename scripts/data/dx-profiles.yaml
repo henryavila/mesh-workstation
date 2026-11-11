@@ -1,0 +1,160 @@
+# DX profile classification. The only list. Catalog, setup, menu, commands,
+# doctor, and tests read this file. Shaped as a manifest so yaml-parse.sh
+# accepts it: each section is a bundle, and its ids are requires_bundles.
+# Do not add anchors, aliases, tags, or nested flow.
+topic:
+  label: "DX profiles"
+  hint: "workstation and server columns"
+  required: false
+  order: 0
+
+bundles:
+  - name: removed
+    desc: "bundles that must not exist in the catalog"
+    requires_bundles:
+      - languages/node
+      - languages/php
+      - databases/mysql
+      - databases/redis
+      - databases/postgresql
+      - databases/mssql-driver
+      - web/valet
+      - web/nginx-php-fpm
+      - web/mailpit
+      - web/ngrok
+      - containers/docker
+      - remote-access/tuios
+      - remote-access/tuios-cloudflare
+
+  - name: removed-commands
+    desc: "mesh commands that must be unregistered"
+    requires_bundles:
+      - tuios
+      - services
+
+  - name: workstation-default
+    desc: "checked on an unflagged headless workstation run"
+    requires_bundles:
+      - foundation/base
+      - shell-terminal/cli-tools
+      - shell-terminal/zsh
+      - shell-terminal/tmux
+      - shell-terminal/nvim
+      - shell-terminal/fonts
+      - git/config
+      - git/lazygit
+      - apps/herdr
+      - apps/herdr-app
+      - apps/flyenv
+
+  - name: workstation-optional
+    desc: "in the catalog, unchecked; flock conflicts with flyenv"
+    requires_bundles:
+      - apps/flock
+      - git/gpg-signing
+      - ai/claude-code
+      - ai/moshi-hook
+      - ai/mdprobe
+      - ai/atomic-skills
+      - ai/rtk
+      - ai/claude-mem
+      - remote-access/ssh
+      - remote-access/mosh
+      - remote-access/tailscale
+      - remote-access/code-server
+
+  - name: server-default
+    desc: "checked on setup.sh --server"
+    requires_bundles:
+      - foundation/base
+      - shell-terminal/cli-tools
+      - shell-terminal/zsh
+      - shell-terminal/tmux
+      - shell-terminal/nvim
+      - git/config
+      - git/lazygit
+      - apps/herdr
+
+  - name: server-optional
+    desc: "unchecked on the server profile"
+    requires_bundles:
+      - git/gpg-signing
+
+  - name: server-forbidden
+    desc: "abort if selected, including via --bundle; removed ids are unioned by the loader"
+    requires_bundles:
+      - shell-terminal/fonts
+      - apps/flyenv
+      - apps/flock
+      - apps/herdr-app
+      - ai/claude-code
+      - ai/moshi-hook
+      - ai/mdprobe
+      - ai/atomic-skills
+      - ai/rtk
+      - ai/claude-mem
+      - remote-access/ssh
+      - remote-access/mosh
+      - remote-access/tailscale
+      - remote-access/code-server
+      - identity/identity
+      - personal/personal
+      - syncthing/syncthing
+
+  - name: identity-only
+    desc: "not selectable in either profile; mesh identity enable only"
+    requires_bundles:
+      - identity/identity
+      - personal/personal
+      - syncthing/syncthing
+
+  - name: conflicts
+    desc: "both selected aborts before apply"
+    requires_bundles:
+      - apps/flyenv
+      - apps/flock
+
+  - name: doctor-workstation
+    desc: "when the bundle is selected"
+    requires_bundles:
+      - foundation/base
+      - herdr-on-path
+      - flyenv-present
+      - flock-absent
+
+  - name: doctor-workstation-flock
+    desc: "when flock is selected instead of flyenv"
+    requires_bundles:
+      - flock-present
+      - flyenv-absent
+
+  - name: doctor-server
+    desc: "missing FlyEnv, Flock, or herdr-app is success"
+    requires_bundles:
+      - foundation/base
+      - herdr-on-path
+
+  - name: doctor-retired
+    desc: "tokens that must not appear in doctor sources"
+    requires_bundles:
+      - php-stack
+      - valet
+      - nginx-php-fpm
+      - mysql
+      - redis
+      - postgresql
+      - tuios
+
+  - name: denylist
+    desc: "paths absent from identity deploy.map and install.sh"
+    requires_bundles:
+      - shell/completions/_artisan
+      - shell/completions/_php_with_artisan
+      - config/tuios-peers.json
+      - config/tuios-hosts.json
+
+  - name: flag-retirement
+    desc: "nonzero message; these flags install nothing"
+    requires_bundles:
+      - "--no-mesh was removed. setup.sh is DX and does not join identity."
+      - "For a headless Linux server: setup.sh --server"
