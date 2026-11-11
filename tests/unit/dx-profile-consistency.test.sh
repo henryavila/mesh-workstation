@@ -518,10 +518,116 @@ menu_node() {
 }
 
 # on in F3
-identity_gate() { dx_skip "identity-gate" "F3"; }
+identity_gate() {
+    local parsed out rc home id
+    parsed="$(bash "$PARSER" < "$CONTRACT" 2>/dev/null)" || {
+        fail "identity-gate could not parse the contract"
+        return
+    }
+    eval "$parsed"
+    local bad=0
+    for id in $(dx_section identity-only); do
+        if dx_section workstation-default | grep -qx "$id" || dx_section server-default | grep -qx "$id"; then
+            fail "identity-only bundle is in a profile default: $id"
+            bad=1
+        fi
+    done
+    [[ "$bad" -eq 0 ]] && pass "profile defaults exclude identity-only bundles"
+
+    home="$(mktemp -d)"
+    out="$(
+        HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_STATE_HOME="$home/.local/state" \
+            bash "$WS/setup.sh" --dry-run --non-interactive --bundle identity/identity 2>&1
+    )" && rc=0 || rc=$?
+    rm -rf "$home"
+    if [[ "$rc" -ne 0 ]] && printf '%s\n' "$out" | grep -q 'identity/identity'; then
+        pass "workstation rejects identity/identity before apply"
+    else
+        fail "workstation accepted identity/identity (rc=$rc)"
+        printf '%s\n' "$out" >&2
+    fi
+
+    home="$(mktemp -d)"
+    out="$(
+        HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_STATE_HOME="$home/.local/state" \
+            MESH_IDENTITY_DIR="$home/missing-identity" \
+            bash "$WS/setup.sh" --dry-run --non-interactive 2>&1
+    )" && rc=0 || rc=$?
+    rm -rf "$home"
+    if printf '%s\n' "$out" | grep -q 'git clone'; then
+        fail "workstation dry-run clones mesh-identity"
+        printf '%s\n' "$out" >&2
+    else
+        pass "workstation dry-run does not git clone mesh-identity"
+    fi
+
+    out="$(bash "$WS/bin/mesh" identity enable --help 2>&1)" && rc=0 || rc=$?
+    if [[ "$rc" -eq 0 ]] && printf '%s\n' "$out" | grep -q 'mesh identity enable'; then
+        pass "mesh identity enable --help is present"
+    else
+        fail "mesh identity enable --help is missing (rc=$rc)"
+        printf '%s\n' "$out" >&2
+    fi
+
+    home="$(mktemp -d)"
+    out="$(MESH_IDENTITY_DIR="$home/none" bash "$WS/bin/mesh" identity status 2>&1)" && rc=0 || rc=$?
+    rm -rf "$home"
+    if [[ "$rc" -eq 0 ]] && printf '%s\n' "$out" | grep -q 'identity: off'; then
+        pass "mesh identity status exits 0 and prints off when identity is absent"
+    else
+        fail "mesh identity status did not report off (rc=$rc)"
+        printf '%s\n' "$out" >&2
+    fi
+}
+
+_dx_identity_checkout() {
+    if [[ -n "${MESH_IDENTITY_DIR:-}" && -f "${MESH_IDENTITY_DIR}/deploy.map" && -f "${MESH_IDENTITY_DIR}/install.sh" ]]; then
+        printf '%s\n' "$MESH_IDENTITY_DIR"
+        return 0
+    fi
+    if [[ -f "$HOME/mesh-identity/deploy.map" && -f "$HOME/mesh-identity/install.sh" ]]; then
+        printf '%s\n' "$HOME/mesh-identity"
+        return 0
+    fi
+    return 1
+}
 
 # on in F3
-identity_denylist() { dx_skip "identity-denylist" "F3"; }
+identity_denylist() {
+    local id_dir path file hit
+    if ! id_dir="$(_dx_identity_checkout)"; then
+        dx_skip "identity-denylist" "F3 (no identity checkout; identity CI runs tests/dx-profile-identity.test.sh)"
+        printf '  SKIP identity-denylist: identity checkout not found\n'
+        return 0
+    fi
+    local parsed
+    parsed="$(bash "$PARSER" < "$CONTRACT" 2>/dev/null)" || {
+        fail "identity-denylist could not parse the contract"
+        return
+    }
+    eval "$parsed"
+    hit=0
+    while IFS= read -r path; do
+        [[ -n "$path" ]] || continue
+        for file in "$id_dir/deploy.map" "$id_dir/install.sh"; do
+            if grep -q "$path" "$file"; then
+                fail "$file still contains denylist path $path"
+                hit=1
+            fi
+        done
+    done <<EOF
+$(dx_section denylist)
+EOF
+    for file in "$id_dir/deploy.map" "$id_dir/install.sh"; do
+        if grep -q 'tuios' "$file"; then
+            fail "$file still contains tuios"
+            hit=1
+        fi
+    done
+    if [[ "$hit" -eq 0 ]]; then
+        pass "identity deploy.map and install.sh omit the denylist and tuios"
+    fi
+}
 
 # on in F4
 docs() { dx_skip "docs" "F4"; }

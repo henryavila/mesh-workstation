@@ -68,11 +68,12 @@ dx_profile_optional() {
     dx_profiles_section "$(dx_profile_name)-optional"
 }
 
-# Server forbids the server-forbidden list plus every removed id.
-# Workstation forbids nothing here; identity-only rejection is F3.
+# Both profiles reject identity-only bundles. Server also rejects its
+# forbidden list and every removed id.
 dx_profile_forbidden() {
     local profile
     profile="$(dx_profile_name)"
+    dx_profiles_section identity-only
     if [[ "$profile" == "server" ]]; then
         dx_profiles_section server-forbidden
         dx_profiles_section removed

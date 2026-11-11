@@ -70,39 +70,21 @@ else
     pass "check() under no-mesh does not call atuin status"
 fi
 
-# --- unflagged interactive path still reaches atuin login ---
+# --- DX setup prints the hint and does not run atuin login ---
 : > "$TMP/atuin.log"
 unset MESH_NO_MESH
 export NON_INTERACTIVE=0
 export ATUIN_LOGIN_AUTO=1
-# Force a TTY-like path: the script checks [[ -t 0 ]]. Under a pipe that fails,
-# so invoke with a pseudo-tty via script/socat if available; otherwise assert the
-# source still contains the login call for the unflagged path.
-if command -v script >/dev/null 2>&1; then
-    rc=0
-    # script -q -c '...' /dev/null provides a TTY for stdin checks on Linux.
-    # HOME is the isolated tmp home so ~/.atuin/bin cannot win PATH.
-    timeout 8 script -q -c "HOME='$TMP/home' PATH='$TMP/bin:$PATH' ATUIN_LOG='$TMP/atuin.log' ATUIN_LOGIN_AUTO=1 NON_INTERACTIVE=0 MESH_NO_MESH=0 bash -c '
-        unset MESH_NO_MESH
-        source \"$SCRIPT\"
-        install
-    '" /dev/null >/dev/null 2>&1 || rc=$?
-    if grep -q 'LOGIN_CALLED' "$TMP/atuin.log" 2>/dev/null; then
-        pass "unflagged install() on a TTY calls atuin login"
-    else
-        # `script` present but TTY probe did not reach login — still require the
-        # unflagged source contract, and fail closed if MESH_NO_MESH leaked in.
-        assert_file_contains "$SCRIPT" 'atuin login' \
-            "unflagged path still contains atuin login (TTY probe inconclusive)"
-        if grep -q 'MESH_NO_MESH=1' "$TMP/atuin.log" 2>/dev/null; then
-            fail "unflagged TTY probe saw MESH_NO_MESH skip — env leaked"
-        else
-            pass "unflagged TTY probe inconclusive — source contract asserted (no no-mesh skip)"
-        fi
-    fi
+rc=0
+out="$(run_phase install 2>&1)" || rc=$?
+assert_eq "$rc" "0" "unflagged install() exits 0 without logging in"
+assert_contains "$out" "Run 'atuin login' when ready" "unflagged install() prints the login hint"
+if grep -q 'LOGIN_CALLED' "$TMP/atuin.log" 2>/dev/null; then
+    fail "DX install() does not call atuin login"
 else
-    assert_file_contains "$SCRIPT" 'atuin login' \
-        "unflagged path still contains atuin login"
+    pass "DX install() does not call atuin login"
 fi
+assert_pattern_absent "$SCRIPT" 'atuin login </dev/tty' \
+    "atuin-login.sh does not invoke atuin login"
 
 summary
