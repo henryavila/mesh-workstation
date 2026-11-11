@@ -7,12 +7,16 @@ cmd_menu_run() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --apply) apply=1; shift ;;
-            --no-mesh) export MESH_NO_MESH=1; shift ;;
+            --no-mesh)
+                printf '%s\n' \
+                    '--no-mesh was removed. setup.sh is DX and does not join identity.' \
+                    'For a headless Linux server: setup.sh --server' >&2
+                exit 1
+                ;;
             -h|--help)
-                echo "Usage: mesh menu [--apply] [--no-mesh]"
+                echo "Usage: mesh menu [--apply]"
                 echo "  mesh menu            Run the interactive selector (standalone)"
                 echo "  mesh menu --apply    Run selector + execute install/uninstall delta"
-                echo "  mesh menu --no-mesh  Omit membership: mesh bundles from the catalog"
                 return 0 ;;
             *) _die "menu: unknown arg '$1'" ;;
         esac

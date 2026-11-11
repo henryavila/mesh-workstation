@@ -75,6 +75,12 @@ while [[ $# -gt 0 ]]; do
 done
 # Explicit --bundle list is a headless selection; never open the menu over it.
 [[ "${#CLI_BUNDLES[@]}" -gt 0 ]] && NON_INTERACTIVE=1
+if [[ "${MESH_NO_MESH:-0}" == "1" ]]; then
+    printf '%s\n' \
+        '--no-mesh was removed. setup.sh is DX and does not join identity.' \
+        'For a headless Linux server: setup.sh --server' >&2
+    exit 1
+fi
 # --repair (verify/operational plan §C, via `mesh doctor --fix`): a verify+repair
 # sweep, never the menu. Force non-interactive so the menu is skipped and any
 # unset option falls back to its silent default; the engine repairs only items

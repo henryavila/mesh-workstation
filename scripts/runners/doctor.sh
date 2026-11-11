@@ -635,6 +635,11 @@ else
 fi
 
 # Exit code: 0 iff no drift/missing/phantom/unresolved health finding
+# shellcheck disable=SC1091
+. "$REPO/scripts/lib/dx-doctor.sh"
+if ! dx_doctor_probes; then
+    count_engine_health=$((count_engine_health + 1))
+fi
 if (( count_drift > 0 || count_missing > 0 || count_marker_miss > 0 || count_launchd_phantom > 0 || count_composer_phar > 0 || count_ext_brew_mount > 0 || count_engine_health > 0 || count_local_only > 0 )); then
     exit 1
 fi

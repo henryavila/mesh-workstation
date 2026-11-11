@@ -1,16 +1,16 @@
 # mesh-workstation — Specification
 
-**Version:** 1.0 (contract evolved in place; see §4 for live selection / `--no-mesh`)
+**Version:** 1.0 (contract evolved in place; see §4 for live selection / `--no-mesh was removed`)
 **Date:** 2026-04-19 (base); membership / Blink contract current as of 2026-08
-**Status:** living — §4 Interface + `membership: mesh` / `MESH_NO_MESH` is authoritative
+**Status:** living — §4 Interface + `membership: mesh` / `MESH_NO_MESH was removed` is authoritative
 
 > **Historical v1 runner:** numbered `00-*` topic inventory (§3 layout, §6 “The 12
 > topics”), flow steps that gate `INCLUDE_*` and run per-topic `install.$OS.sh`
 > with “no abort on partial error” (§4 Flow steps 5–7, §11), and `dev-bootstrap`
 > naming elsewhere in this file describe the **pre-engine** bootstrap. The live
 > product contract is §4: Blink menu / `selections.list` / `--bundle`, plus the
-> `membership: mesh` + `MESH_NO_MESH` matrix. Membership apply is **fail-closed**
-> (abort nonzero if a membership bundle reappears under `--no-mesh`); that
+> `membership: mesh` + `MESH_NO_MESH was removed` matrix. Membership apply is **fail-closed**
+> (abort nonzero if a membership bundle reappears under `--no-mesh was removed`); that
 > supersedes the old “single-topic failure does not abort” wording for the
 > membership guard only.
 
@@ -118,8 +118,8 @@ Every `verify.sh` MUST:
 ```bash
 bash setup.sh                          # interactive Blink menu → engine apply
 bash setup.sh --list-bundles           # list topic/bundle + default mark
-bash setup.sh --no-mesh                # omit membership: mesh from the catalog
-bash setup.sh --no-mesh --bundle languages/php
+bash setup.sh --no-mesh was removed                # omit membership: mesh from the catalog
+bash setup.sh --no-mesh was removed --bundle removed-bundle
 SKIP_TOPICS="identity personal" bash setup.sh   # CI hatch only
 DRY_RUN=1 bash setup.sh                # print what the engine would do
 bash setup.sh --help                   # usage
@@ -130,7 +130,7 @@ bash setup.sh --help                   # usage
 > `--bundle topic/bundle` flags. `scripts/commands/topic.sh` may still export
 > `ONLY_TOPICS` for older wrappers — do not document it as the product path.
 
-### `membership: mesh` and `MESH_NO_MESH`
+### `membership: mesh` and `MESH_NO_MESH was removed`
 
 Manifest bundles may declare `membership: mesh` (schema enum). The five
 membership bundles are: `personal/personal`, `identity/identity`,
@@ -139,9 +139,9 @@ membership bundles are: `personal/personal`, `identity/identity`,
 | Mode | Behavior |
 |------|----------|
 | Unflagged | Membership bundles stay in the catalog; `personal` and `identity` remain required locks alongside `foundation/base`, `git/config`, `shell-terminal/cli-tools`, `shell-terminal/zsh`. |
-| `--no-mesh` / `MESH_NO_MESH=1` | Catalog omits membership bundles (remove, do not grey). Unlock list (`git/config`, `shell-terminal/cli-tools`, `shell-terminal/zsh`) loses required locks and starts unchecked. Headless default without `--bundle` is **only** `foundation/base`. Engine apply **aborts nonzero** if any membership bundle appears in the resolved selection/closure. `atuin-login` is a no-op. |
+| `--no-mesh was removed` / `MESH_NO_MESH was removed=1` | Catalog omits membership bundles (remove, do not grey). Unlock list (`git/config`, `shell-terminal/cli-tools`, `shell-terminal/zsh`) loses required locks and starts unchecked. Headless default without `--bundle` is **only** `foundation/base`. Engine apply **aborts nonzero** if any membership bundle appears in the resolved selection/closure. `atuin-login` is a no-op. |
 
-`mesh menu --no-mesh` exports the same `MESH_NO_MESH=1` before launching the TUI.
+`mesh menu --no-mesh was removed` exports the same `MESH_NO_MESH was removed=1` before launching the TUI.
 
 ### Recognized env vars
 
@@ -149,7 +149,7 @@ membership bundles are: `personal/personal`, `identity/identity`,
 |-----|--------|
 | `SKIP_TOPICS` | CI hatch: space-separated topic ids dropped from the resolved selection |
 | `ONLY_TOPICS` | **Legacy / dead in v2 `setup.sh`** — not a working selection API |
-| `MESH_NO_MESH=1` | Same as `--no-mesh` (exported by the flag before menu/apply) |
+| `MESH_NO_MESH was removed=1` | Same as `--no-mesh was removed` (exported by the flag before menu/apply) |
 | `DRY_RUN=1` | don't execute, just list |
 | `MESH_IDENTITY_REPO` | URL of the personal dotfiles repo (used by topic `95-dotfiles-personal`) |
 | `MESH_IDENTITY_DIR` | clone destination (default: `~/mesh-identity`) |
@@ -166,7 +166,7 @@ membership bundles are: `personal/personal`, `identity/identity`,
 ### Flow
 
 **Current (v2 engine):** resolve selection from Blink / `selections.list` /
-`--bundle`; under `MESH_NO_MESH=1` omit membership + demote unlock list; engine
+`--bundle`; under `MESH_NO_MESH was removed=1` omit membership + demote unlock list; engine
 apply is fail-closed on membership leakage; item failures are summarized per
 engine policy.
 
@@ -179,7 +179,7 @@ work against this):
    (if brew isn't installed yet on the first run, that's fine — topic 00-core
     doesn't depend on brew; detection re-runs after 00-core if needed)
 3. list topics/*/ in alphabetical order
-4. resolve selection from Blink menu, `selections.list`, and/or repeated `--bundle` flags; apply `SKIP_TOPICS` CI hatch if set; under `MESH_NO_MESH=1` omit `membership: mesh` and demote the unlock list
+4. resolve selection from Blink menu, `selections.list`, and/or repeated `--bundle` flags; apply `SKIP_TOPICS` CI hatch if set; under `MESH_NO_MESH was removed=1` omit `membership: mesh` and demote the unlock list
 5. for opt-in topics, check the corresponding env var:
      60-web-stack    requires INCLUDE_WEBSTACK=1    (skip with message otherwise)
      70-remote-access    requires INCLUDE_REMOTE=1
@@ -191,7 +191,7 @@ work against this):
    c. bash $installer 2>&1 | tee -a $LOG   (inherits $OS, $BREW_PREFIX, $CODE_DIR, $GIT_NAME, etc.)
    d. if $topic/templates/ exists: bash lib/deploy.sh $topic/templates
    e. capture exit code; mark failure but keep going (no abort on partial error)
-      NOTE: under MESH_NO_MESH, membership leakage still aborts (fail-closed) —
+      NOTE: under MESH_NO_MESH was removed, membership leakage still aborts (fail-closed) —
       that guard overrides this “no abort” sentence.
 7. print summary (passed/failed/skipped)
 8. exit 0 if everything passed, 1 otherwise
@@ -595,7 +595,7 @@ jobs:
         run: |
           bash setup.sh --non-interactive \
             --bundle foundation/base \
-            --bundle languages/php \
+            --bundle removed-bundle \
             --bundle shell-terminal/cli-tools \
             --bundle shell-terminal/zsh \
             --bundle git/config
@@ -603,7 +603,7 @@ jobs:
         run: |
           bash setup.sh --non-interactive \
             --bundle foundation/base \
-            --bundle languages/php \
+            --bundle removed-bundle \
             --bundle shell-terminal/cli-tools \
             --bundle shell-terminal/zsh \
             --bundle git/config
@@ -619,7 +619,7 @@ jobs:
         run: |
           bash setup.sh --non-interactive \
             --bundle foundation/base \
-            --bundle languages/php \
+            --bundle removed-bundle \
             --bundle shell-terminal/cli-tools \
             --bundle shell-terminal/zsh \
             --bundle git/config
@@ -627,7 +627,7 @@ jobs:
         run: |
           bash setup.sh --non-interactive \
             --bundle foundation/base \
-            --bundle languages/php \
+            --bundle removed-bundle \
             --bundle shell-terminal/cli-tools \
             --bundle shell-terminal/zsh \
             --bundle git/config
@@ -686,7 +686,7 @@ fi
 
 ## 11. Error handling
 
-- **Membership guard (current):** under `--no-mesh` / `MESH_NO_MESH=1`, if any
+- **Membership guard (current):** under `--no-mesh was removed` / `MESH_NO_MESH was removed=1`, if any
   `membership: mesh` bundle appears in the resolved selection/closure, apply
   **aborts nonzero** (fail-closed). This overrides the historical “keep going”
   rule for that guard only — see §4.

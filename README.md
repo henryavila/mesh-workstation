@@ -69,10 +69,10 @@ The checkout can live on another volume. `cd` there and run `bash setup.sh` from
 
 1. On a Mac with no Homebrew, a TTY asks whether to install it on a separate path. **Yes:** it asks for the path (Enter accepts `/Volumes/External/homebrew` when that volume is mounted) and exports `BREW_CUSTOM_PREFIX`. **No:** it exports `BREW_CUSTOM_PREFIX=/opt/homebrew`. Foundation installs Homebrew at that prefix later in the same run. `gh` is still missing at this point, so a warning about anonymous GitHub API access is expected; the `identity` topic installs `gh` after Homebrew and opens the browser to log in.
 2. One `sudo` password prompt (`sudo -v`) runs before the menu. Later `sudo` calls stay quiet for the cache window (~5–15 min).
-3. **No Node on PATH:** lean bootstrap — `foundation`, `identity`, `git/config`, `shell-terminal` (incl. fonts), `languages/node`, `personal`. The full default-on fleet (databases, web, AI, …) stays uninstalled until you pick it.
+3. **No Node on PATH:** lean bootstrap — `foundation`, `identity`, `git/config`, `shell-terminal` (incl. fonts), `removed-bundle`, `personal`. The full default-on fleet (databases, web, AI, …) stays uninstalled until you pick it.
 4. **Node already on PATH:** the Blink menu opens on this first run.
 5. **Open a new shell** so the fnm and Homebrew `PATH` fragments load.
-6. **Next run:** `bash setup.sh` opens the Blink menu — pick bundles (`web/valet`, `databases/mysql`, `ai/claude-code`, …), confirm, apply.
+6. **Next run:** `bash setup.sh` opens the Blink menu — pick bundles (`removed-bundle`, `removed-bundle`, `ai/claude-code`, …), confirm, apply.
 
 A mesh workstation keeps `identity` and `personal` selected. The menu asks for `MESH_IDENTITY_REPO` (URL or `owner/name`) and for the dev root, `CODE_DIR` (default `~/code`). Point `CODE_DIR` at the directory that should hold repos — on an external disk, that disk's code directory (for example `/Volumes/External/code`).
 
@@ -104,22 +104,22 @@ The upstream Homebrew install script always writes `/opt/homebrew` (Apple Silico
 
 A custom prefix builds most formulae from source, because bottles are not relocatable. The first full workstation install takes longer than `/opt/homebrew`. On a volume mounted with owners disabled, user LaunchAgents (Redis, Mailpit, Postgres, Syncthing) start through the rootfs launch-wrapper when those topics run. The question printed before the menu lists both.
 
-**Guest / server mode (`--no-mesh`)** — install tools without joining the mesh:
+**Guest / server mode (`--no-mesh was removed`)** — install tools without joining the mesh:
 
 ```bash
 # interactive picker without membership bundles
-bash setup.sh --no-mesh
-mesh menu --no-mesh
+bash setup.sh --no-mesh was removed
+mesh menu --no-mesh was removed
 
 # headless: only foundation/base (then add bundles explicitly)
-NON_INTERACTIVE=1 bash setup.sh --no-mesh
-bash setup.sh --no-mesh --non-interactive --bundle languages/php
+NON_INTERACTIVE=1 bash setup.sh --no-mesh was removed
+bash setup.sh --no-mesh was removed --non-interactive --bundle removed-bundle
 
 # inspect the filtered catalog
-bash setup.sh --no-mesh --list-bundles
+bash setup.sh --no-mesh was removed --list-bundles
 ```
 
-Under `--no-mesh` / `MESH_NO_MESH=1`:
+Under `--no-mesh was removed` / `MESH_NO_MESH was removed=1`:
 
 - Five `membership: mesh` bundles are **omitted from the catalog** (removed, not
   greyed): `personal/personal`, `identity/identity`, `syncthing/syncthing`,
@@ -147,7 +147,7 @@ bash setup.sh --non-interactive
 bash setup.sh --list-bundles
 
 # headless selection without the menu (repeatable)
-bash setup.sh --non-interactive --bundle languages/php --bundle databases/mysql
+bash setup.sh --non-interactive --bundle removed-bundle --bundle removed-bundle
 ```
 
 The menu is automatically skipped when any of these is true: (a) `NON_INTERACTIVE=1` or `--non-interactive`; (b) stdin/stdout isn't a TTY (pipe, cron, CI); (c) one or more `--bundle` flags were passed.
@@ -164,7 +164,7 @@ The bootstrap **prints at the end everything that still needs a human touch** �
 
 - `chsh` — the bootstrap **tries `sudo chsh` automatically** using the warm sudo ticket (`sudo usermod -s` as a Linux fallback). Falls back to an advisory only on LDAP/SSSD-managed corporate accounts, restricted PAM, or missing sudo cache. Opt out with `CHSH_AUTO=0`.
 - **Replicated secrets (git-crypt)** — if `mesh-identity/secrets/` exists but this clone is still locked, setup **asks for the git-crypt key at the end** (after the engine, so the prompt is not buried in `tee` output). Paste the base64 key from your password manager. Headless runs skip the prompt and print `mesh secret unlock` then `mesh secret deploy` in the follow-up summary. Without this unlock, env-tokens such as the Moshi pairing token never land on the machine.
-- **Atuin encryption-key backup** — after installing Atuin, the bootstrap prints instructions and includes them in the final summary, even when login is deferred. Run `atuin key` on a machine already syncing and save the key in **Keeper** (or another password manager), together with your Atuin username and password. On a new machine use `atuin login -u YOUR_USERNAME`, enter the password and the **same key** at the prompts, then run `atuin sync`. Login can run inline on an interactive terminal; defer it with `ATUIN_LOGIN_AUTO=0` or `NON_INTERACTIVE=1`. For a first account only, run `atuin register -u YOUR_USERNAME -e YOUR_EMAIL`, then `atuin key` and save the key immediately. Mesh does not back it up automatically; if all copies are lost, the server cannot recover it. Keep secrets out of Git and installation logs. Sync onboarding is skipped under `--no-mesh`. See [Atuin setup](topics/shell-terminal/README.md#atuin-account-and-key-backup).
+- **Atuin encryption-key backup** — after installing Atuin, the bootstrap prints instructions and includes them in the final summary, even when login is deferred. Run `atuin key` on a machine already syncing and save the key in **Keeper** (or another password manager), together with your Atuin username and password. On a new machine use `atuin login -u YOUR_USERNAME`, enter the password and the **same key** at the prompts, then run `atuin sync`. Login can run inline on an interactive terminal; defer it with `ATUIN_LOGIN_AUTO=0` or `NON_INTERACTIVE=1`. For a first account only, run `atuin register -u YOUR_USERNAME -e YOUR_EMAIL`, then `atuin key` and save the key immediately. Mesh does not back it up automatically; if all copies are lost, the server cannot recover it. Keep secrets out of Git and installation logs. Sync onboarding is skipped under `--no-mesh was removed`. See [Atuin setup](topics/shell-terminal/README.md#atuin-account-and-key-backup).
 - `newgrp docker` / log out+in, when 45-docker just added you to the `docker` group.
 - `ngrok config add-authtoken <token>`, when `INCLUDE_NGROK=1` ran without a token available. The bootstrap **prompts for the token in the interactive menu** and stores it to `~/.local/state/mesh/secrets.env` (mode 0600), so it's only asked once per machine. Automation mode: export `NGROK_AUTHTOKEN=<token>` before running.
 - Manual `mailpit &` / `docker` service start, when systemd isn't available (rare).
@@ -197,12 +197,12 @@ Live catalog dirs under `topics/<id>/` (unnumbered). Select bundles in Blink,
 | Topic | Example bundles | Notes |
 |-------|-----------------|-------|
 | `foundation` | `foundation/base` | Core packages (git, curl, jq, envsubst, …) |
-| `languages` | `languages/node`, `languages/php` | Node via fnm, multi-PHP, Python |
+| `languages` | `removed-bundle`, `removed-bundle` | Node via fnm, multi-PHP, Python |
 | `shell-terminal` | `shell-terminal/cli-tools`, `shell-terminal/zsh`, `shell-terminal/tmux` | fzf/bat/eza/starship/atuin, zsh+completions, tmux |
 | `git` | `git/config`, `git/lazygit`, `git/gpg-signing` | Global gitconfig + shell aliases |
-| `web` | `web/valet`, `web/nginx-php-fpm`, `web/mailpit`, `web/ngrok` | Local HTTPS / nginx+PHP-FPM stack |
-| `databases` | `databases/mysql`, `databases/redis`, `databases/postgresql` | DB servers + drivers |
-| `containers` | `containers/docker` | Docker / Colima |
+| `web` | `removed-bundle`, `removed-bundle`, `removed-bundle`, `removed-bundle` | Local HTTPS / nginx+PHP-FPM stack |
+| `databases` | `removed-bundle`, `removed-bundle`, `removed-bundle` | DB servers + drivers |
+| `containers` | `removed-bundle` | Docker / Colima |
 | `remote-access` | `remote-access/ssh`, `remote-access/mosh`, `remote-access/tailscale`, `remote-access/code-server` | `tailscale` + `code-server` are `membership: mesh` |
 | `syncthing` | `syncthing/syncthing` | P2P sync — `membership: mesh` |
 | `identity` | `identity/identity` | gh + SSH machine identity — `membership: mesh` |
@@ -224,7 +224,7 @@ Primarily for automation / CI — the interactive menu fills these in for human 
 | `--non-interactive` / `NON_INTERACTIVE=1` | Skip the menu even on a TTY |
 | `--dry-run` / `DRY_RUN=1` | Print what would run without executing (also skips `sudo -v`) |
 | `--list-bundles` | List every `topic/bundle` and its default mark (required / default on / opt-in) |
-| `--no-mesh` / `MESH_NO_MESH=1` | Omit the five `membership: mesh` bundles (remove, do not grey); unlock `git/config` + `shell-terminal/cli-tools` + `shell-terminal/zsh` (unchecked); headless default `foundation/base` only; fail-closed apply; `atuin-login` no-op |
+| `--no-mesh was removed` / `MESH_NO_MESH was removed=1` | Omit the five `membership: mesh` bundles (remove, do not grey); unlock `git/config` + `shell-terminal/cli-tools` + `shell-terminal/zsh` (unchecked); headless default `foundation/base` only; fail-closed apply; `atuin-login` no-op |
 | `--bundle topic/bundle` | Add a bundle to the headless selection (repeatable; implies non-interactive) |
 | `--help` / `-h` | Usage message |
 | `SKIP_TOPICS` | CI hatch: space-separated **topic ids** dropped from the resolved selection (not a product catalog mode) |
@@ -377,6 +377,6 @@ This repo **never** versions personal configs (SSH, git identity, project-specif
 
 - [`docs/SPEC.md`](docs/SPEC.md) — technical specification (architecture, acceptance criteria, roadmap).
 - [`docs/ALIASES.md`](docs/ALIASES.md) — inventory of universal aliases (shell + git) that every dev who ran the bootstrap receives.
-- [`docs/SERVICES.md`](docs/SERVICES.md) — `mesh services`: cross-platform control of mesh-owned daemons (active × enabled, install ≠ auto-enable).
+- [`docs/SERVICES.md`](docs/SERVICES.md) — `removed-command`: cross-platform control of mesh-owned daemons (active × enabled, install ≠ auto-enable).
 - `topics/<topic>/README.md` — per-topic customization and gotchas.
 - [`dotfiles-template`](https://github.com/henryavila/dotfiles-template) — the flip side of the layer: personal overrides.

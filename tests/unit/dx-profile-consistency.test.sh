@@ -630,10 +630,63 @@ EOF
 }
 
 # on in F4
-docs() { dx_skip "docs" "F4"; }
+docs() {
+    local f line bad
+    local files="$WS/README.md $WS/docs/SPEC.md"
+    local tokens="languages/node languages/php databases/mysql databases/redis databases/postgresql databases/mssql-driver web/valet web/nginx-php-fpm web/mailpit web/ngrok containers/docker remote-access/tuios"
+    tokens="$tokens mesh\\ services mesh\\ tuios"
+    for f in $files; do
+        for bad in languages/node languages/php databases/mysql databases/redis \
+            databases/postgresql databases/mssql-driver web/valet web/nginx-php-fpm \
+            web/mailpit web/ngrok containers/docker remote-access/tuios \
+            "mesh services" "mesh tuios"; do
+            if grep -q "$bad" "$f"; then
+                fail "$f still advertises $bad"
+            fi
+        done
+        if grep -n -- '--no-mesh' "$f" | grep -v 'removed' >/dev/null; then
+            fail "$f advertises --no-mesh as a working mode"
+        else
+            pass "$(basename "$f") does not advertise removed bundles or --no-mesh"
+        fi
+    done
+    if grep -q -- '--server' "$WS/scripts/commands/setup.sh" \
+        && ! grep -q -- '--no-mesh' "$WS/scripts/commands/setup.sh"; then
+        pass "mesh setup help mentions --server and not --no-mesh"
+    else
+        fail "mesh setup help does not match the retired flag"
+    fi
+    local names
+    names="$(bash "$WS/bin/mesh" __commands 2>/dev/null | awk -F '\t' 'NF { print $1 }')"
+    if printf '%s\n' "$names" | grep -qx 'tuios' || printf '%s\n' "$names" | grep -qx 'services'; then
+        fail "mesh help still lists tuios or services"
+    else
+        pass "mesh help does not list tuios or services"
+    fi
+}
 
 # on in F4
-doctor() { dx_skip "doctor" "F4"; }
+doctor() {
+    local token f hit=0
+    local sources="$WS/scripts/runners/doctor.sh $WS/scripts/commands/doctor.sh $WS/scripts/lib/dx-doctor.sh"
+    for token in php-stack valet nginx-php-fpm mysql redis postgresql tuios; do
+        for f in $sources; do
+            if grep -q "$token" "$f"; then
+                fail "doctor source $f contains retired probe token $token"
+                hit=1
+            fi
+        done
+    done
+    for token in herdr-on-path flyenv-present flock-absent flock-present flyenv-absent; do
+        if grep -q "$token" "$WS/scripts/lib/dx-doctor.sh"; then
+            pass "doctor implements $token"
+        else
+            fail "doctor is missing probe $token"
+            hit=1
+        fi
+    done
+    [[ "$hit" -eq 0 ]] && pass "doctor sources have no retired probe tokens"
+}
 
 echo "=== contract-shape ==="
 contract_shape

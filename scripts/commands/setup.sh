@@ -13,7 +13,7 @@ Usage: mesh setup [--no-update] [setup.sh args...]
   repos, current branch) first so the install system + identity config are
   current, then runs setup.sh.
     --no-update   skip the refresh; run the current checkout's setup.sh as-is
-  Extra args pass through to setup.sh (e.g. --non-interactive, --server, --repair, --no-mesh).
+  Extra args pass through to setup.sh (e.g. --non-interactive, --server, --repair).
 EOF
                 return 0
                 ;;

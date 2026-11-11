@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # tests/integration/bootstrap-topic-selection.test.sh
 #
-# v2 catalog: setup.sh --list-bundles / --bundle / --no-mesh. The numbered
+# v2 catalog: setup.sh --list-bundles / --bundle / --server. The numbered
 # ONLY_TOPICS / INCLUDE_* topic selectors are gone.
 
 set -uo pipefail
@@ -20,8 +20,10 @@ echo "═══ bootstrap bundle selection ═══"
 list_out="$(HOME="$TESTROOT/home-list" bash "$REPO_ROOT/setup.sh" --list-bundles 2>&1)"
 assert_contains "$list_out" "foundation/base" \
     "bootstrap --list-bundles lists foundation/base"
-assert_contains "$list_out" "web/nginx-php-fpm" \
-    "bootstrap --list-bundles includes the WSL web stack"
+assert_contains "$list_out" "apps/flyenv" \
+    "bootstrap --list-bundles includes FlyEnv"
+assert_not_contains "$list_out" "web/nginx-php-fpm" \
+    "bootstrap --list-bundles does not list the removed web stack"
 assert_contains "$list_out" "ai/" \
     "bootstrap --list-bundles includes AI bundles"
 assert_contains "$list_out" "personal/personal" \
@@ -37,7 +39,7 @@ dry_out="$(
     XDG_CONFIG_HOME="$TESTROOT/home-dry/.config" \
     XDG_STATE_HOME="$TESTROOT/home-dry/.local/state" \
     NON_INTERACTIVE=1 \
-        bash "$REPO_ROOT/setup.sh" --no-mesh --non-interactive --dry-run \
+        bash "$REPO_ROOT/setup.sh" --non-interactive --dry-run \
             --bundle shell-terminal/cli-tools --bundle shell-terminal/zsh 2>&1
 )"
 assert_contains "$dry_out" "shell-terminal/cli-tools" \
@@ -45,7 +47,7 @@ assert_contains "$dry_out" "shell-terminal/cli-tools" \
 assert_contains "$dry_out" "shell-terminal/zsh" \
     "--bundle shell-terminal/zsh is in the dry-run plan"
 assert_not_contains "$dry_out" "personal/personal" \
-    "--no-mesh dry-run does not apply personal/personal"
+    "explicit --bundle list does not apply personal/personal"
 assert_not_contains "$dry_out" "web/nginx-php-fpm" \
     "unrelated web stack is not pulled in by a shell-only --bundle list"
 
@@ -53,13 +55,13 @@ php_out="$(
     HOME="$TESTROOT/home-php" \
     XDG_CONFIG_HOME="$TESTROOT/home-php/.config" \
     XDG_STATE_HOME="$TESTROOT/home-php/.local/state" \
-        bash "$REPO_ROOT/setup.sh" --no-mesh --non-interactive --dry-run \
+        bash "$REPO_ROOT/setup.sh" --server --non-interactive --dry-run \
             --bundle languages/php 2>&1
 )"
 assert_contains "$php_out" "languages/php" \
-    "--bundle languages/php is in the dry-run plan"
+    "server rejects a removed bundle id"
 assert_not_contains "$php_out" "personal/personal" \
-    "--no-mesh --bundle languages/php does not add personal"
+    "rejected server bundle does not apply personal"
 
 ai_only_out="$(
     HOME="$TESTROOT/home-ai-only" \
