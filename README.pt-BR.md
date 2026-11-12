@@ -69,10 +69,10 @@ O clone pode ficar em outro volume. Entre nesse diretório e rode `bash setup.sh
 
 1. Num Mac sem Homebrew, um TTY pergunta se a instalação vai para um path separado. **Sim:** pede o path (Enter aceita `/Volumes/External/homebrew` quando esse volume está montado) e exporta `BREW_CUSTOM_PREFIX`. **Não:** exporta `BREW_CUSTOM_PREFIX=/opt/homebrew`. O foundation instala o Homebrew nesse prefixo mais tarde, na mesma execução. O `gh` ainda não existe nesse momento, então um aviso de API anônima do GitHub é esperado; o tópico `identity` instala o `gh` depois do Homebrew e abre o browser para o login.
 2. Uma senha de `sudo` (`sudo -v`) aparece antes do menu. As chamadas seguintes ficam quietas na janela do cache (~5–15 min).
-3. **Sem Node no PATH:** lean bootstrap — `foundation`, `identity`, `git/config`, `shell-terminal` (incl. fonts), `removed-bundle`, `personal`. A frota default-on inteira (bancos, web, AI, …) fica de fora até você marcar.
+3. **Sem Node no PATH:** o run aplica o DX de workstation (foundation, shell, git, herdr, herdr-app, FlyEnv). Não clona a identity.
 4. **Com Node já no PATH:** o menu Blink abre nesta primeira execução.
 5. **Abra um shell novo** para carregar os fragments de PATH do fnm e do Homebrew.
-6. **Próxima execução:** `bash setup.sh` abre o menu Blink — escolha bundles (`removed-bundle`, `removed-bundle`, `ai/claude-code`, …), confirme, aplique.
+6. **Próxima execução:** `bash setup.sh` abre o menu Blink. IA, acesso remoto e Flock ficam desmarcados até você escolher. Identity entra depois, com `mesh identity enable`.
 
 Uma workstation da mesh mantém `identity` e `personal` marcados. O menu pede `MESH_IDENTITY_REPO` (URL ou `owner/name`) e o dev root, `CODE_DIR` (default `~/code`). Aponte `CODE_DIR` para o diretório onde os repos devem morar — num disco externo, o diretório de código desse disco (por exemplo `/Volumes/External/code`).
 
@@ -104,34 +104,25 @@ O instalador upstream do Homebrew sempre grava em `/opt/homebrew` (Apple Silicon
 
 Prefixo custom compila a maior parte das formulae do fonte, porque os bottles não se relocam. A primeira workstation completa demora mais do que em `/opt/homebrew`. Num volume montado sem owners, LaunchAgents de usuário (Redis, Mailpit, Postgres, Syncthing) sobem pelo launch-wrapper no rootfs quando esses tópicos rodam. A pergunta impressa antes do menu lista os dois.
 
-**Modo convidado / servidor (`--no-mesh was removed`)** — instalar ferramentas sem entrar na mesh:
+**DX de workstation** é o caminho sem flag. Instala foundation, shell, git, herdr CLI, herdr-app e FlyEnv. Não clona a identity.
+
+**DX de servidor** é explícito:
 
 ```bash
-# picker interativo sem bundles de membership
-bash setup.sh --no-mesh was removed
-mesh menu --no-mesh was removed
-
-# headless: só foundation/base (depois adicione bundles explicitamente)
-NON_INTERACTIVE=1 bash setup.sh --no-mesh was removed
-bash setup.sh --no-mesh was removed --non-interactive --bundle removed-bundle
-
-# inspecionar o catálogo filtrado
-bash setup.sh --no-mesh was removed --list-bundles
+bash setup.sh --server
+bash setup.sh --server --dry-run
 ```
 
-Sob `--no-mesh was removed` / `MESH_NO_MESH was removed=1`:
+Esse perfil é Linux sem desktop. Instala foundation, CLIs de shell, zsh, tmux, Neovim, git e o herdr CLI. Recusa FlyEnv, Flock, herdr-app, fontes, IA, acesso remoto e identity.
 
-- Cinco bundles `membership: mesh` são **omitidos do catálogo** (removidos, não
-  acinzentados): `personal/personal`, `identity/identity`, `syncthing/syncthing`,
-  `remote-access/tailscale`, `remote-access/code-server`.
-- Lista de unlock (`git/config`, `shell-terminal/cli-tools`, `shell-terminal/zsh`)
-  perde locks required e começa **desmarcada**.
-- Default headless sem `--bundle` é **só** `foundation/base`.
-- O apply do engine **aborta com nonzero** (fail-closed) se algum bundle de
-  membership reaparecer na seleção/closure resolvida.
-- `atuin-login` é **no-op**.
-- O caminho **sem flag** ainda mantém `personal` / `identity` como locks
-  required junto de `foundation/base` e da lista de unlock.
+**Sync da identity** é um comando posterior, nos dois perfis:
+
+```bash
+mesh identity status
+mesh identity enable
+```
+
+Flock é o app opcional de PHP. Ele conflita com o FlyEnv. O menu deixa só um marcado.
 
 **Atuin: guarde a chave de criptografia.** Após instalar o Atuin, o Mesh mostra
 essa orientação e a repete no resumo final, mesmo se o login ficar para depois.
@@ -143,7 +134,7 @@ navegador. Apenas para uma primeira conta, use `atuin register -u SEU_USUARIO
 -e SEU_EMAIL` e depois `atuin key`, guardando a chave imediatamente. O Mesh não
 faz backup automático dessa chave; se todas as cópias forem perdidas, o servidor
 não poderá recuperá-la. Não coloque a chave no Git, em chats ou logs de instalação.
-`--no-mesh was removed` pula essa orientação de sincronização.
+O login do Atuin fica para `mesh identity enable`. O DX só instala o binário.
 
 **Modo automação / CI** (sem menu — env vars e flags):
 
@@ -159,7 +150,7 @@ bash setup.sh --non-interactive
 bash setup.sh --list-bundles
 
 # seleção headless sem menu (repetível)
-bash setup.sh --non-interactive --bundle removed-bundle --bundle removed-bundle
+bash setup.sh --non-interactive --bundle foundation/base --bundle shell-terminal/zsh
 ```
 
 O menu é pulado automaticamente quando: (a) `NON_INTERACTIVE=1` ou `--non-interactive`; (b) stdin/stdout não é TTY (pipe, cron, CI); (c) um ou mais `--bundle` foram passados.
@@ -179,12 +170,10 @@ Catálogo vivo em `topics/<id>/` (sem numeração). Selecione bundles no Blink,
 | Topic | Bundles de exemplo | Notas |
 |-------|--------------------|-------|
 | `foundation` | `foundation/base` | Pacotes core (git, curl, jq, envsubst, …) |
-| `languages` | `removed-bundle`, `removed-bundle` | Node via fnm, multi-PHP, Python |
+| `apps` | `apps/herdr`, `apps/herdr-app`, `apps/flyenv`, `apps/flock` | herdr, FlyEnv, Flock opcional |
 | `shell-terminal` | `shell-terminal/cli-tools`, `shell-terminal/zsh`, `shell-terminal/tmux` | fzf/bat/eza/starship/atuin, zsh+completions, tmux |
 | `git` | `git/config`, `git/lazygit`, `git/gpg-signing` | gitconfig global + aliases de shell |
-| `web` | `removed-bundle`, `removed-bundle`, `removed-bundle`, `removed-bundle` | Stack HTTPS local / nginx+PHP-FPM |
-| `databases` | `removed-bundle`, `removed-bundle`, `removed-bundle` | Servidores DB + drivers |
-| `containers` | `removed-bundle` | Docker / Colima |
+
 | `remote-access` | `remote-access/ssh`, `remote-access/mosh`, `remote-access/tailscale`, `remote-access/code-server` | `tailscale` + `code-server` são `membership: mesh` |
 | `syncthing` | `syncthing/syncthing` | Sync P2P — `membership: mesh` |
 | `identity` | `identity/identity` | gh + identidade SSH da máquina — `membership: mesh` |
@@ -222,7 +211,7 @@ Primariamente para automação / CI — o menu interativo preenche essas vars pr
 | `--non-interactive` / `NON_INTERACTIVE=1` | Pula menu mesmo em TTY |
 | `--dry-run` / `DRY_RUN=1` | Imprime o que rodaria sem executar (também pula `sudo -v`) |
 | `--list-bundles` | Lista cada `topic/bundle` e sua marca default (required / default on / opt-in) |
-| `--no-mesh was removed` / `MESH_NO_MESH was removed=1` | Omite os cinco bundles `membership: mesh` (remove, não acinzenta); unlock `git/config` + `shell-terminal/cli-tools` + `shell-terminal/zsh` (desmarcados); default headless só `foundation/base`; apply fail-closed; `atuin-login` no-op |
+| `--server` | DX headless em Linux. Recusa apps de desktop e bundles de identity |
 | `--bundle topic/bundle` | Adiciona um bundle à seleção headless (repetível; implica non-interactive) |
 | `--help` / `-h` | Mensagem de uso |
 | `SKIP_TOPICS` | hatch de CI: ids de topic separados por espaço removidos da seleção resolvida |

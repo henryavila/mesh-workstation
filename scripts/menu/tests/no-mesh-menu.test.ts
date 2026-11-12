@@ -1,7 +1,7 @@
 /**
  * no-mesh-menu.test.ts — F1: MESH_NO_MESH=1 hides membership, unlocks the
  * documented list (unchecked), keeps foundation/base locked; unflagged path
- * still requires personal + identity.
+ * Identity-only rows are hidden on the unflagged path too.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -45,10 +45,12 @@ describe('unflagged catalog (MESH_NO_MESH unset)', () => {
   const required = requiredKeys(refs);
   const keys = new Set(refs.map((r) => r.key));
 
-  it('still lists membership bundles', () => {
-    for (const k of MEMBERSHIP_KEYS) {
-      expect(keys.has(k), k).toBe(true);
-    }
+  it('hides identity-only rows and keeps optional remote-access rows', () => {
+    expect(keys.has('identity/identity')).toBe(false);
+    expect(keys.has('personal/personal')).toBe(false);
+    expect(keys.has('syncthing/syncthing')).toBe(false);
+    expect(keys.has('remote-access/tailscale')).toBe(true);
+    expect(keys.has('remote-access/code-server')).toBe(true);
   });
 
   it('does not lock personal and identity as required', () => {
@@ -85,13 +87,12 @@ describe('no-mesh catalog (MESH_NO_MESH=1)', () => {
     }
   });
 
-  it('keeps foundation/base required+selected; unlock list not required and unchecked', () => {
+  it('keeps the workstation column selected; the shell rejects this env before launch', () => {
     expect(required.has('foundation/base')).toBe(true);
     expect(selected.has('foundation/base')).toBe(true);
-    for (const k of NO_MESH_UNLOCK_KEYS) {
-      expect(required.has(k), `${k} must not be required`).toBe(false);
-      expect(selected.has(k), `${k} must start unchecked`).toBe(false);
-    }
+    expect(selected.has('git/config')).toBe(true);
+    expect(selected.has('shell-terminal/cli-tools')).toBe(true);
+    expect(selected.has('shell-terminal/zsh')).toBe(true);
   });
 
   it('skips identity onboarding because identity bundle is absent', () => {

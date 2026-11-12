@@ -31,8 +31,20 @@ dx_doctor_foundation_bins() {
 
 dx_doctor_flyenv_present() {
     [[ -d /Applications/FlyEnv.app ]] && return 0
-    command -v dpkg >/dev/null 2>&1 && dpkg -s flyenv >/dev/null 2>&1 && return 0
+    if command -v dpkg >/dev/null 2>&1; then
+        dpkg -s flyenv >/dev/null 2>&1 && return 0
+    fi
+    if command -v rpm >/dev/null 2>&1; then
+        rpm -q flyenv >/dev/null 2>&1 && return 0
+    fi
+    [[ -d /opt/FlyEnv || -d /usr/lib/flyenv ]] && return 0
+    [[ -e "/mnt/c/Program Files/FlyEnv/FlyEnv.exe" ]] && return 0
+    [[ -e "/mnt/c/Program Files/FlyEnv/flyenv.exe" ]] && return 0
     return 1
+}
+
+dx_doctor_wsl() {
+    grep -qi microsoft /proc/version 2>/dev/null
 }
 
 dx_doctor_flock_present() {
@@ -75,6 +87,8 @@ dx_doctor_probes() {
         if dx_doctor_flyenv_present && ! dx_doctor_flock_present; then
             printf 'probe flyenv-present ok\n'
             printf 'probe flock-absent ok\n'
+        elif dx_doctor_wsl && ! dx_doctor_flyenv_present; then
+            printf 'probe flyenv-present deferred (Windows installer, not in-distro)\n'
         else
             printf 'probe flyenv-present failed\n' >&2
             rc=1

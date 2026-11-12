@@ -16,8 +16,8 @@ import { tmp } from './helpers.js';
 describe('readAllManifests (real repo manifests)', () => {
   const topics = readAllManifests();
 
-  it('reads all 12 topics, sorted by order', () => {
-    expect(topics.length).toBe(12);
+  it('reads all 9 topics, sorted by order', () => {
+    expect(topics.length).toBe(9);
     const orders = topics.map((t) => t.header.order);
     expect([...orders]).toEqual([...orders].sort((a, b) => a - b));
     expect(topics[0].id).toBe('foundation');
@@ -33,12 +33,11 @@ describe('readAllManifests (real repo manifests)', () => {
     }
   });
 
-  it('languages/php has a multiselect + a derive_from select', () => {
+  it('apps/flyenv is in the catalog and languages/php is not', () => {
     const refs = flattenBundles(topics);
-    const php = indexByKey(refs).get('languages/php')!;
-    const opts = php.bundle.options!;
-    expect(opts.find((o) => o.name === 'versions')!.type).toBe('multiselect');
-    expect(opts.find((o) => o.name === 'default-version')!.derive_from).toBe('versions');
+    const keys = new Set(indexByKey(refs).keys());
+    expect(keys.has('apps/flyenv')).toBe(true);
+    expect(keys.has('languages/php')).toBe(false);
   });
 
   it('no bundle desc uses screen-position wording (options live behind Enter, not "below")', () => {

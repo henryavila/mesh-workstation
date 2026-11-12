@@ -503,17 +503,6 @@ process_repo() {
                     warn "$name: \`mesh syncthing pair\` retornou non-zero (continuando)"
                 fi
             fi
-            # T-006: a --full identity re-apply reconciles service boot-state too.
-            # No diff to gate on in --full — reconcile unconditionally toward the
-            # per-host services.default.<alias>. Enabled bit only; non-fatal.
-            local mesh_bin_full="$HERE/../../bin/mesh"
-            if [[ -f "$mesh_bin_full" ]]; then
-                notice "$name: reconciliando boot-state de serviços (mesh services reconcile)…"
-                if ! NON_INTERACTIVE=1 MESH_IDENTITY_DIR="$repo" \
-                        bash "$mesh_bin_full" services reconcile 2>&1 | sed 's/^/    /'; then
-                    warn "$name: \`mesh services reconcile\` retornou non-zero (continuando)"
-                fi
-            fi
         fi
         # Defense in depth: never write empty last-applied. new_head is the
         # actual post-pull SHA; head_remote was the upstream snapshot at

@@ -2,16 +2,12 @@
  * init.ts — compute the picker's initial bundle selection, mirroring setup.sh:
  *   - saved ~/.config/mesh/selections.list present → re-run: start from it
  *     (dropping keys no longer in the manifest), always force required bundles.
- *   - absent → fresh install: every bundle except `default_selected: false`
- *     (required bundles always in).
+ *   - absent → fresh install: the workstation column from dx-profiles.yaml.
  * Either way the requires_bundles closure is applied so deps are present.
- *
- * Under MESH_NO_MESH=1 the catalog is filtered (membership: mesh removed) and
- * the unlock list loses required locks / starts unchecked before these helpers
- * run — see applyNoMeshCatalog / NO_MESH_UNLOCK_KEYS.
+ * Identity-only rows stay out of the picker. FlyEnv and Flock cannot both stay selected.
  */
 import { closeRequires } from './delta.js';
-import { workstationDefaultKeys } from './dx-profiles.js';
+import { identityOnlyKeys, withoutConflictPeer, workstationDefaultKeys } from './dx-profiles.js';
 import { flattenBundles } from './manifest-reader.js';
 import { readSelections } from './selections-io.js';
 import { selectionsFile } from './paths.js';
@@ -64,11 +60,22 @@ export function applyNoMeshUnlocks(refs: BundleRef[]): BundleRef[] {
  * Apply the no-mesh catalog transform: strip membership, then unlock the
  * documented list. No-op when MESH_NO_MESH is unset/0.
  */
+function hideIdentityOnly(topics: Topic[]): Topic[] {
+  const hidden = identityOnlyKeys();
+  const out: Topic[] = [];
+  for (const t of topics) {
+    const bundles = t.bundles.filter((b) => !hidden.has(`${t.id}/${b.name}`));
+    if (bundles.length > 0) out.push({ ...t, bundles });
+  }
+  return out;
+}
+
 export function applyNoMeshCatalog(
   topics: Topic[],
   env: NodeJS.ProcessEnv = process.env,
 ): { topics: Topic[]; refs: BundleRef[] } {
-  const filtered = noMeshActive(env) ? filterMembershipTopics(topics) : topics;
+  const base = hideIdentityOnly(topics);
+  const filtered = noMeshActive(env) ? filterMembershipTopics(base) : base;
   const flat = flattenBundles(filtered);
   const refs = noMeshActive(env) ? applyNoMeshUnlocks(flat) : flat;
   // Rebuild topics from (possibly unlocked) refs so required/default_selected
@@ -130,5 +137,6 @@ export function initialSelection(
     fromSaved = false;
   }
   for (const k of required) base.add(k);
-  return { selected: closeRequires(base, index).selected, fromSaved };
+  const closed = closeRequires(base, index).selected;
+  return { selected: withoutConflictPeer(closed), fromSaved };
 }

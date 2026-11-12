@@ -18,11 +18,38 @@ interface Contract {
 
 let cached: Set<string> | null = null;
 
-export function workstationDefaultKeys(): Set<string> {
-  if (cached) return cached;
+function sectionKeys(name: string): Set<string> {
   const file = path.join(REPO_ROOT, 'scripts/data/dx-profiles.yaml');
   const raw = parseYaml(readFileSync(file, 'utf8')) as Contract;
-  const section = (raw.bundles ?? []).find((b) => b.name === 'workstation-default');
-  cached = new Set(section?.requires_bundles ?? []);
+  const section = (raw.bundles ?? []).find((b) => b.name === name);
+  return new Set(section?.requires_bundles ?? []);
+}
+
+export function workstationDefaultKeys(): Set<string> {
+  if (cached) return cached;
+  cached = sectionKeys('workstation-default');
   return cached;
+}
+
+export function identityOnlyKeys(): Set<string> {
+  return sectionKeys('identity-only');
+}
+
+/** [kept-when-both, dropped-when-both] from the conflicts section. */
+export function conflictPair(): [string, string] | null {
+  const ids = [...sectionKeys('conflicts')];
+  if (ids.length < 2) return null;
+  return [ids[0], ids[1]];
+}
+
+/** One of FlyEnv and Flock. The key just added wins; otherwise keep the first. */
+export function withoutConflictPeer(selected: Set<string>, justAdded?: string): Set<string> {
+  const pair = conflictPair();
+  if (!pair) return selected;
+  const [first, second] = pair;
+  if (!selected.has(first) || !selected.has(second)) return selected;
+  const next = new Set(selected);
+  if (justAdded === second) next.delete(first);
+  else next.delete(second);
+  return next;
 }

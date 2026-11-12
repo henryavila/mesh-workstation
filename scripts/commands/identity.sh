@@ -42,6 +42,9 @@ cmd_identity_enable() {
         source "$1"
         install
     ' bash "$apply" || return $?
+    # shellcheck source=../lib/dx-profiles.sh
+    . "$ws/scripts/lib/dx-profiles.sh"
+    dx_persist_identity_for_update "$dir"
     bash "$ws/bin/mesh" secret offer-unlock || true
     printf '%s\n' "[atuin-login] Atuin login is identity, not DX. Run 'atuin login' when ready."
     if [[ "${ATUIN_LOGIN_NOW:-0}" == "1" ]]; then

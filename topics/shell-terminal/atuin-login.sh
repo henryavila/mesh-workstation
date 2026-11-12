@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Interactive atuin login (cross-machine history). Skipped in NON_INTERACTIVE
-# or when ATUIN_LOGIN_AUTO=0.
+# Atuin login is identity. This item only prints the hint.
 
 # Audit 2026-06-03 (path-fragility): on WSL atuin lives in ~/.atuin/bin (official
 # curl|sh installer) which is NOT on the engine item-subshell PATH, so a bare
@@ -14,10 +13,6 @@ check() {
 }
 
 install() {
-    if [[ "${MESH_NO_MESH:-0}" == "1" ]]; then
-        echo "[atuin-login] MESH_NO_MESH=1 — skipping atuin login." >&2
-        return 0
-    fi
     echo "[atuin-login] Atuin login is identity, not DX. Run 'atuin login' when ready." >&2
     return 0
 }

@@ -1,20 +1,50 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { buildFormSpec, applyFormValues, resolveSelectedDefaults, incompleteRequired } from '../src/core/form-spec.js';
 import { readAllManifests, flattenBundles, indexByKey } from '../src/core/manifest-reader.js';
-import type { BundleRef } from '../src/types.js';
+import type { Bundle, BundleRef } from '../src/types.js';
 
 const index = indexByKey(flattenBundles(readAllManifests()));
 
-describe('buildFormSpec — languages/php (source file + derive_from)', () => {
-  const php = index.get('languages/php')!;
-  const spec = buildFormSpec(php.bundle, php.topic.dir);
+function sampleBundle(): { bundle: Bundle; dir: string } {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mesh-form-'));
+  writeFileSync(path.join(dir, 'versions.txt'), '8.2\n8.3\n8.4\n8.5\n');
+  const bundle = {
+    name: 'sample',
+    options: [
+      {
+        name: 'versions',
+        type: 'multiselect',
+        label: 'Versions',
+        env: 'SAMPLE_VERSIONS',
+        source: 'versions.txt',
+        required_min: 1,
+        default: ['8.4'],
+      },
+      {
+        name: 'default-version',
+        type: 'select',
+        label: 'Default',
+        env: 'SAMPLE_DEFAULT',
+        derive_from: 'versions',
+      },
+    ],
+  } as Bundle;
+  return { bundle, dir };
+}
 
-  it('reads PHP versions from the source file into multiselect choices', () => {
+describe('buildFormSpec — source file + derive_from', () => {
+  const { bundle, dir } = sampleBundle();
+  const spec = buildFormSpec(bundle, dir);
+
+  it('reads versions from the source file into multiselect choices', () => {
     const versions = spec.fields.find((f) => f.name === 'versions')!;
     expect(versions.kind).toBe('multiselect');
     const ids = (versions.choices ?? []).map((c) => (typeof c === 'string' ? c : c.id));
     expect(ids).toEqual(expect.arrayContaining(['8.2', '8.3', '8.4', '8.5']));
-    expect(versions.min).toBe(1); // required_min
+    expect(versions.min).toBe(1);
   });
 
   it('maps derive_from → optionsFrom on the default-version select', () => {
@@ -29,24 +59,24 @@ describe('buildFormSpec — languages/php (source file + derive_from)', () => {
 });
 
 describe('buildFormSpec — existing params.env override', () => {
-  const php = index.get('languages/php')!;
-  it('pre-fills from an existing PHP_VERSIONS over the schema default', () => {
-    const spec = buildFormSpec(php.bundle, php.topic.dir, new Map([['PHP_VERSIONS', '8.3 8.5']]));
+  const { bundle, dir } = sampleBundle();
+  it('pre-fills from an existing SAMPLE_VERSIONS over the schema default', () => {
+    const spec = buildFormSpec(bundle, dir, new Map([['SAMPLE_VERSIONS', '8.3 8.5']]));
     expect(spec.values['versions']).toEqual(['8.3', '8.5']);
   });
 });
 
 describe('applyFormValues → params', () => {
   it('serialises values to env vars; clears emptied keys', () => {
-    const php = index.get('languages/php')!;
-    const spec = buildFormSpec(php.bundle, php.topic.dir);
+    const { bundle, dir } = sampleBundle();
+    const spec = buildFormSpec(bundle, dir);
     const params = new Map<string, string>();
     applyFormValues(spec, { versions: ['8.4', '8.5'], 'default-version': '8.5' }, params);
-    expect(params.get('PHP_VERSIONS')).toBe('8.4 8.5');
-    expect(params.get('PHP_DEFAULT')).toBe('8.5');
+    expect(params.get('SAMPLE_VERSIONS')).toBe('8.4 8.5');
+    expect(params.get('SAMPLE_DEFAULT')).toBe('8.5');
 
     applyFormValues(spec, { versions: [], 'default-version': '' }, params);
-    expect(params.has('PHP_VERSIONS')).toBe(false);
+    expect(params.has('SAMPLE_VERSIONS')).toBe(false);
   });
 });
 

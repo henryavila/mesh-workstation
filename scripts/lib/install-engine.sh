@@ -114,6 +114,8 @@ fi
 . "$ENGINE_DIR/autoupdate-policy.sh"
 # shellcheck disable=SC1091
 . "$ENGINE_DIR/no-mesh.sh"
+# shellcheck source=dx-profiles.sh
+. "$ENGINE_DIR/dx-profiles.sh"
 
 DRY_RUN=0
 SELECTIONS_FILE=""
@@ -460,23 +462,11 @@ while [[ "${#queue[@]}" -gt 0 ]]; do
     done < <(_bundle_requires "$topic" "$idx")
 done
 
-# ─── no-mesh membership deny (fail-closed, plan P3) ───────────────────────────
-# After orphan filter + requires_bundles closure: if MESH_NO_MESH=1 and any
-# selected/closed bundle carries membership=mesh, abort nonzero and mutate
-# nothing (before markers / print-closure / apply).
-if no_mesh_active; then
-    for entry in "${SEL_ENTRIES[@]+"${SEL_ENTRIES[@]}"}"; do
-        topic="${entry%%/*}"; bundle="${entry#*/}"
-        _ensure_topic_parsed "$topic" || exit 65
-        if ! idx="$(_bundle_index "$topic" "$bundle")"; then
-            log_error "selected bundle does not exist: $entry"
-            exit 64
-        fi
-        if no_mesh_omit_bundle "$(_bundle_membership "$topic" "$idx")"; then
-            log_error "no-mesh: refusing to apply membership bundle '$entry' (MESH_NO_MESH=1)"
-            exit 64
-        fi
-    done
+# Profile guard after closure, before markers or package changes.
+# MESH_NO_MESH is retired: exit here so a direct engine call cannot install.
+dx_retire_no_mesh
+if [[ "${#SEL_ENTRIES[@]}" -gt 0 ]]; then
+    dx_guard_selection_args "${SEL_ENTRIES[@]}"
 fi
 
 # ─── stable baseline order: (topic.order, bundle index) ───────────────────────

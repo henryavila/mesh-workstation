@@ -25,6 +25,7 @@ import {
 } from './core/manifest-reader.js';
 import { scanAll } from './core/scanner.js';
 import { applyNoMeshCatalog, initialSelection, requiredKeys } from './core/init.js';
+import { withoutConflictPeer } from './core/dx-profiles.js';
 import { closeRequires, dependentsOf, computeDelta, toggleTopicSelection } from './core/delta.js';
 import { writeSelections, writeRemovals, writeParams, readParams } from './core/selections-io.js';
 import { buildFormSpec, applyFormValues, resolveSelectedDefaults, incompleteRequired, type BundleFormSpec } from './core/form-spec.js';
@@ -125,10 +126,11 @@ export function App({ dryRun, onExit }: AppProps) {
       // (e.g. personal/repo → MESH_IDENTITY_REPO) never reaches params.env and
       // the engine fails on it. Copy params so the resolve doesn't mutate state.
       const resolved = resolveSelectedDefaults(selectedRefs, new Map(params));
-      writeSelections([...selected]);
+      const persisted = withoutConflictPeer(selected);
+      writeSelections([...persisted]);
       // Persist the deselected set so the Apply uninstalls it before installing
       // (Frente A). On a fresh install prevSelection is empty → no removals.
-      writeRemovals(computeDelta(prevSelection, selected).remove);
+      writeRemovals(computeDelta(prevSelection, persisted).remove);
       writeParams(resolved);
     }
     onExit(code);
@@ -171,7 +173,7 @@ export function App({ dryRun, onExit }: AppProps) {
       setBanner(null);
     } else {
       const { selected: closed, added } = closeRequires([...selected, key], index);
-      setSelected(closed);
+      setSelected(withoutConflictPeer(closed, key));
       setBanner(added.length ? `Auto-selected: ${added.join(', ')}` : null);
     }
   };
@@ -195,14 +197,14 @@ export function App({ dryRun, onExit }: AppProps) {
     if (!topic) return;
     const keys = topic.bundles.map((b) => `${topicId}/${b.name}`);
     const res = toggleTopicSelection(keys, required, selected, index);
-    setSelected(res.selected);
+    setSelected(withoutConflictPeer(res.selected));
     if (res.added.length) setBanner(`Auto-selected: ${res.added.join(', ')}`);
     else if (res.removed.length) setBanner(`${topic.header.label}: deselected ${res.removed.length} bundle(s)`);
     else setBanner(`${topic.header.label}: all selected`);
   };
 
   const selectAll = () => {
-    setSelected(new Set(refs.map((r) => r.key)));
+    setSelected(withoutConflictPeer(new Set(refs.map((r) => r.key))));
     setBanner(null);
   };
   const selectNone = () => {

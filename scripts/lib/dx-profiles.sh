@@ -103,6 +103,32 @@ dx_profile_first_forbidden() {
     return 1
 }
 
+# Retired flag. Exits before any install. Used by setup, the menu, and the engine.
+dx_retire_no_mesh() {
+    if [[ "${MESH_NO_MESH:-0}" == "1" ]]; then
+        printf '%s\n' \
+            '--no-mesh was removed. setup.sh is DX and does not join identity.' \
+            'For a headless Linux server: setup.sh --server' >&2
+        exit 1
+    fi
+}
+
+# Called only from `mesh identity enable`, after a real checkout exists.
+# DX setup seeds the workstation repo and does not write this path.
+dx_persist_identity_for_update() {
+    local dir="$1" config
+    [[ -d "$dir/.git" ]] || return 0
+    config="${XDG_CONFIG_HOME:-$HOME/.config}/mesh/config.env"
+    mkdir -p "$(dirname "$config")"
+    [[ -f "$config" ]] || : > "$config"
+    if ! grep -q '^MESH_IDENTITY_DIR=' "$config"; then
+        printf 'MESH_IDENTITY_DIR=%q\n' "$dir" >> "$config"
+    fi
+    if ! grep -F -q "$dir" "$config"; then
+        printf 'AUTO_UPDATE_REPOS+=(\n    %q\n)\n' "$dir" >> "$config"
+    fi
+}
+
 # Print the two conflict ids when both are in the argument list.
 dx_profile_conflict_hit() {
     local left right id seen_left=0 seen_right=0
@@ -118,4 +144,28 @@ dx_profile_conflict_hit() {
         return 0
     fi
     return 1
+}
+
+# Abort before apply when the resolved ids contain a forbidden bundle or
+# both sides of a conflicts pair. Prints the bundle id. Mutates nothing.
+dx_guard_selection_args() {
+    local hit
+    if hit="$(dx_profile_conflict_hit "$@")"; then
+        printf 'setup.sh: conflict, refusing to apply both: %s\n' "$(printf '%s' "$hit" | tr '\n' ' ')" >&2
+        exit 1
+    fi
+    if hit="$(dx_profile_first_forbidden "$@")"; then
+        printf 'setup.sh: forbidden bundle for %s profile: %s\n' "$(dx_profile_name)" "$hit" >&2
+        exit 1
+    fi
+}
+
+dx_guard_selection_file() {
+    local file="$1" line ids=()
+    [[ -f "$file" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+        ids+=("$line")
+    done < "$file"
+    dx_guard_selection_args ${ids[@]+"${ids[@]}"}
 }

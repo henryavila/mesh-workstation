@@ -69,12 +69,12 @@ The checkout can live on another volume. `cd` there and run `bash setup.sh` from
 
 1. On a Mac with no Homebrew, a TTY asks whether to install it on a separate path. **Yes:** it asks for the path (Enter accepts `/Volumes/External/homebrew` when that volume is mounted) and exports `BREW_CUSTOM_PREFIX`. **No:** it exports `BREW_CUSTOM_PREFIX=/opt/homebrew`. Foundation installs Homebrew at that prefix later in the same run. `gh` is still missing at this point, so a warning about anonymous GitHub API access is expected; the `identity` topic installs `gh` after Homebrew and opens the browser to log in.
 2. One `sudo` password prompt (`sudo -v`) runs before the menu. Later `sudo` calls stay quiet for the cache window (~5–15 min).
-3. **No Node on PATH:** lean bootstrap — `foundation`, `identity`, `git/config`, `shell-terminal` (incl. fonts), `removed-bundle`, `personal`. The full default-on fleet (databases, web, AI, …) stays uninstalled until you pick it.
-4. **Node already on PATH:** the Blink menu opens on this first run.
-5. **Open a new shell** so the fnm and Homebrew `PATH` fragments load.
-6. **Next run:** `bash setup.sh` opens the Blink menu — pick bundles (`removed-bundle`, `removed-bundle`, `ai/claude-code`, …), confirm, apply.
+3. **No Node on PATH:** the run applies the workstation DX default (foundation, shell, git, herdr, herdr-app, FlyEnv). It does not clone identity.
+4. **Node already on PATH:** the Blink menu opens on this first run, with that same column checked.
+5. **Open a new shell** so the Homebrew `PATH` fragments load.
+6. **Next run:** `bash setup.sh` opens the Blink menu. Optional rows (AI, remote access, Flock) stay unchecked until you mark them.
 
-A mesh workstation keeps `identity` and `personal` selected. The menu asks for `MESH_IDENTITY_REPO` (URL or `owner/name`) and for the dev root, `CODE_DIR` (default `~/code`). Point `CODE_DIR` at the directory that should hold repos — on an external disk, that disk's code directory (for example `/Volumes/External/code`).
+DX setup does not clone `mesh-identity`. After the machine is useful, `mesh identity enable` clones it and applies your files. The menu asks for the dev root, `CODE_DIR` (default `~/code`). Point `CODE_DIR` at the directory that should hold repos — on an external disk, that disk's code directory (for example `/Volumes/External/code`).
 
 > Historical note: early releases used a `whiptail` checklist over numbered
 > `00-*` / `60-web-stack` topics. That UX is gone; do not treat numbered topic
@@ -104,34 +104,25 @@ The upstream Homebrew install script always writes `/opt/homebrew` (Apple Silico
 
 A custom prefix builds most formulae from source, because bottles are not relocatable. The first full workstation install takes longer than `/opt/homebrew`. On a volume mounted with owners disabled, user LaunchAgents (Redis, Mailpit, Postgres, Syncthing) start through the rootfs launch-wrapper when those topics run. The question printed before the menu lists both.
 
-**Guest / server mode (`--no-mesh was removed`)** — install tools without joining the mesh:
+**Workstation DX** is the unflagged path. It installs foundation, the shell, git, the herdr CLI, herdr-app, and FlyEnv. It does not clone identity.
+
+**Server DX** is explicit:
 
 ```bash
-# interactive picker without membership bundles
-bash setup.sh --no-mesh was removed
-mesh menu --no-mesh was removed
-
-# headless: only foundation/base (then add bundles explicitly)
-NON_INTERACTIVE=1 bash setup.sh --no-mesh was removed
-bash setup.sh --no-mesh was removed --non-interactive --bundle removed-bundle
-
-# inspect the filtered catalog
-bash setup.sh --no-mesh was removed --list-bundles
+bash setup.sh --server
+bash setup.sh --server --dry-run
 ```
 
-Under `--no-mesh was removed` / `MESH_NO_MESH was removed=1`:
+That profile is headless Linux. It installs foundation, the shell CLIs, zsh, tmux, Neovim, git, and the herdr CLI. It refuses FlyEnv, Flock, herdr-app, fonts, AI bundles, remote-access bundles, and identity bundles.
 
-- Five `membership: mesh` bundles are **omitted from the catalog** (removed, not
-  greyed): `personal/personal`, `identity/identity`, `syncthing/syncthing`,
-  `remote-access/tailscale`, `remote-access/code-server`.
-- Unlock list (`git/config`, `shell-terminal/cli-tools`, `shell-terminal/zsh`)
-  loses required locks and starts **unchecked**.
-- Headless default without `--bundle` is **only** `foundation/base`.
-- Engine apply **aborts nonzero** (fail-closed) if any membership bundle
-  reappears in the resolved selection/closure.
-- `atuin-login` is a **no-op**.
-- The **unflagged** path still keeps `personal` / `identity` as required locks
-  alongside `foundation/base` and the unlock list.
+**Identity sync** is a later command, on either profile:
+
+```bash
+mesh identity status
+mesh identity enable
+```
+
+Flock is the optional PHP app. It conflicts with FlyEnv. The menu keeps only one of them checked.
 
 **Automation / CI mode** (no menu — env vars and flags):
 
@@ -147,7 +138,7 @@ bash setup.sh --non-interactive
 bash setup.sh --list-bundles
 
 # headless selection without the menu (repeatable)
-bash setup.sh --non-interactive --bundle removed-bundle --bundle removed-bundle
+bash setup.sh --non-interactive --bundle foundation/base --bundle shell-terminal/zsh
 ```
 
 The menu is automatically skipped when any of these is true: (a) `NON_INTERACTIVE=1` or `--non-interactive`; (b) stdin/stdout isn't a TTY (pipe, cron, CI); (c) one or more `--bundle` flags were passed.
@@ -163,8 +154,8 @@ BREW_CUSTOM_PREFIX=/Volumes/External/homebrew bash setup.sh --non-interactive
 The bootstrap **prints at the end everything that still needs a human touch** — you don't need to remember a list. The post-run advisories cover:
 
 - `chsh` — the bootstrap **tries `sudo chsh` automatically** using the warm sudo ticket (`sudo usermod -s` as a Linux fallback). Falls back to an advisory only on LDAP/SSSD-managed corporate accounts, restricted PAM, or missing sudo cache. Opt out with `CHSH_AUTO=0`.
-- **Replicated secrets (git-crypt)** — if `mesh-identity/secrets/` exists but this clone is still locked, setup **asks for the git-crypt key at the end** (after the engine, so the prompt is not buried in `tee` output). Paste the base64 key from your password manager. Headless runs skip the prompt and print `mesh secret unlock` then `mesh secret deploy` in the follow-up summary. Without this unlock, env-tokens such as the Moshi pairing token never land on the machine.
-- **Atuin encryption-key backup** — after installing Atuin, the bootstrap prints instructions and includes them in the final summary, even when login is deferred. Run `atuin key` on a machine already syncing and save the key in **Keeper** (or another password manager), together with your Atuin username and password. On a new machine use `atuin login -u YOUR_USERNAME`, enter the password and the **same key** at the prompts, then run `atuin sync`. Login can run inline on an interactive terminal; defer it with `ATUIN_LOGIN_AUTO=0` or `NON_INTERACTIVE=1`. For a first account only, run `atuin register -u YOUR_USERNAME -e YOUR_EMAIL`, then `atuin key` and save the key immediately. Mesh does not back it up automatically; if all copies are lost, the server cannot recover it. Keep secrets out of Git and installation logs. Sync onboarding is skipped under `--no-mesh was removed`. See [Atuin setup](topics/shell-terminal/README.md#atuin-account-and-key-backup).
+- **Replicated secrets (git-crypt)** — DX setup does not ask for the key. `mesh identity enable` offers `mesh secret unlock` after the checkout exists.
+- **Atuin** — DX installs the binary and prints a login hint. The account and encryption key are part of identity sync, not the first setup. See [Atuin setup](topics/shell-terminal/README.md#atuin-account-and-key-backup).
 - `newgrp docker` / log out+in, when 45-docker just added you to the `docker` group.
 - `ngrok config add-authtoken <token>`, when `INCLUDE_NGROK=1` ran without a token available. The bootstrap **prompts for the token in the interactive menu** and stores it to `~/.local/state/mesh/secrets.env` (mode 0600), so it's only asked once per machine. Automation mode: export `NGROK_AUTHTOKEN=<token>` before running.
 - Manual `mailpit &` / `docker` service start, when systemd isn't available (rare).
@@ -187,7 +178,7 @@ for runtime repair.
 | Update while intentionally tracking a non-`main` branch | `mesh update --force` | Bypasses only the branch gate; dirty trees and unpushed commits are still refused. |
 
 The `--force` flag is branch authorization only; it is not repair and does not
-imply `--full`. For a broken PHP/web runtime, use `mesh doctor --fix`.
+imply `--full`. For a broken selected app, use `mesh doctor --fix`.
 
 ## Topics
 
@@ -197,17 +188,11 @@ Live catalog dirs under `topics/<id>/` (unnumbered). Select bundles in Blink,
 | Topic | Example bundles | Notes |
 |-------|-----------------|-------|
 | `foundation` | `foundation/base` | Core packages (git, curl, jq, envsubst, …) |
-| `languages` | `removed-bundle`, `removed-bundle` | Node via fnm, multi-PHP, Python |
 | `shell-terminal` | `shell-terminal/cli-tools`, `shell-terminal/zsh`, `shell-terminal/tmux` | fzf/bat/eza/starship/atuin, zsh+completions, tmux |
 | `git` | `git/config`, `git/lazygit`, `git/gpg-signing` | Global gitconfig + shell aliases |
-| `web` | `removed-bundle`, `removed-bundle`, `removed-bundle`, `removed-bundle` | Local HTTPS / nginx+PHP-FPM stack |
-| `databases` | `removed-bundle`, `removed-bundle`, `removed-bundle` | DB servers + drivers |
-| `containers` | `removed-bundle` | Docker / Colima |
-| `remote-access` | `remote-access/ssh`, `remote-access/mosh`, `remote-access/tailscale`, `remote-access/code-server` | `tailscale` + `code-server` are `membership: mesh` |
-| `syncthing` | `syncthing/syncthing` | P2P sync — `membership: mesh` |
-| `identity` | `identity/identity` | gh + SSH machine identity — `membership: mesh` |
-| `personal` | `personal/personal` | Clone/apply mesh-identity — `membership: mesh` |
-| `ai` | `ai/claude-code`, `ai/mdprobe`, `ai/atomic-skills`, `ai/rtk` | Agent CLI + workflow tools |
+| `apps` | `apps/herdr`, `apps/herdr-app`, `apps/flyenv`, `apps/flock` | herdr CLI and app, FlyEnv, optional Flock |
+| `remote-access` | `remote-access/ssh`, `remote-access/mosh`, `remote-access/tailscale`, `remote-access/code-server` | Optional. Off on a server profile |
+| `ai` | `ai/claude-code`, `ai/mdprobe`, `ai/atomic-skills`, `ai/rtk` | Optional agent CLIs |
 
 Full alias inventory: [`docs/ALIASES.md`](docs/ALIASES.md).
 
@@ -224,7 +209,7 @@ Primarily for automation / CI — the interactive menu fills these in for human 
 | `--non-interactive` / `NON_INTERACTIVE=1` | Skip the menu even on a TTY |
 | `--dry-run` / `DRY_RUN=1` | Print what would run without executing (also skips `sudo -v`) |
 | `--list-bundles` | List every `topic/bundle` and its default mark (required / default on / opt-in) |
-| `--no-mesh was removed` / `MESH_NO_MESH was removed=1` | Omit the five `membership: mesh` bundles (remove, do not grey); unlock `git/config` + `shell-terminal/cli-tools` + `shell-terminal/zsh` (unchecked); headless default `foundation/base` only; fail-closed apply; `atuin-login` no-op |
+| `--server` | Headless Linux DX. Refuses desktop apps and identity bundles |
 | `--bundle topic/bundle` | Add a bundle to the headless selection (repeatable; implies non-interactive) |
 | `--help` / `-h` | Usage message |
 | `SKIP_TOPICS` | CI hatch: space-separated **topic ids** dropped from the resolved selection (not a product catalog mode) |

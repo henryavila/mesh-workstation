@@ -508,9 +508,10 @@ menu_node() {
         fail "shell fragment exports a menu runtime"
         printf '%s\n' "$hit" >&2
     fi
-    if grep -q 'menu-node' "$WS/setup.sh" \
-        && grep -q 'NON_INTERACTIVE' "$WS/setup.sh" \
-        && grep -A 40 'ensure_menu_node()' "$WS/setup.sh" | grep -q 'workstation'; then
+    if grep -q 'menu-node.sh' "$WS/setup.sh" \
+        && grep -q 'menu-node.sh' "$WS/scripts/runners/menu.sh" \
+        && grep -A 20 'ensure_menu_node()' "$WS/scripts/lib/menu-node.sh" | grep -q 'workstation' \
+        && grep -A 20 'ensure_menu_node()' "$WS/scripts/lib/menu-node.sh" | grep -q 'NON_INTERACTIVE'; then
         pass "menu node is private to the interactive workstation menu"
     else
         fail "ensure_menu_node is missing the workstation and non-interactive guards"
@@ -631,25 +632,35 @@ EOF
 
 # on in F4
 docs() {
-    local f line bad
-    local files="$WS/README.md $WS/docs/SPEC.md"
-    local tokens="languages/node languages/php databases/mysql databases/redis databases/postgresql databases/mssql-driver web/valet web/nginx-php-fpm web/mailpit web/ngrok containers/docker remote-access/tuios"
-    tokens="$tokens mesh\\ services mesh\\ tuios"
+    local f bad help rc=0
+    local files="$WS/README.md $WS/README.pt-BR.md $WS/docs/SPEC.md"
     for f in $files; do
         for bad in languages/node languages/php databases/mysql databases/redis \
             databases/postgresql databases/mssql-driver web/valet web/nginx-php-fpm \
             web/mailpit web/ngrok containers/docker remote-access/tuios \
-            "mesh services" "mesh tuios"; do
+            "mesh services" "mesh tuios" "removed-bundle"; do
             if grep -q "$bad" "$f"; then
                 fail "$f still advertises $bad"
             fi
         done
-        if grep -n -- '--no-mesh' "$f" | grep -v 'removed' >/dev/null; then
-            fail "$f advertises --no-mesh as a working mode"
+        if grep -q -- '--no-mesh' "$f" || grep -q 'MESH_NO_MESH' "$f"; then
+            fail "$f still contains the retired flag"
+        elif ! grep -q -- '--server' "$f" || ! grep -q 'mesh identity enable' "$f"; then
+            fail "$f does not document --server and mesh identity enable"
         else
-            pass "$(basename "$f") does not advertise removed bundles or --no-mesh"
+            pass "$(basename "$f") documents the two profiles"
         fi
     done
+    help="$(bash "$WS/setup.sh" --help 2>&1)" && rc=0 || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        fail "setup.sh --help exited $rc"
+    elif printf '%s\n' "$help" | grep -q 'omit membership'; then
+        fail "setup.sh --help still documents the retired flag as a working filter"
+    elif ! printf '%s\n' "$help" | grep -q -- '--server'; then
+        fail "setup.sh --help does not mention --server"
+    else
+        pass "setup.sh --help documents --server and not the old filter"
+    fi
     if grep -q -- '--server' "$WS/scripts/commands/setup.sh" \
         && ! grep -q -- '--no-mesh' "$WS/scripts/commands/setup.sh"; then
         pass "mesh setup help mentions --server and not --no-mesh"

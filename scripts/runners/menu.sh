@@ -15,6 +15,11 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 
 # shellcheck disable=SC1091
 . "$ROOT/scripts/lib/log.sh"
+# shellcheck source=../lib/dx-profiles.sh
+. "$ROOT/scripts/lib/dx-profiles.sh"
+# shellcheck source=../lib/menu-node.sh
+. "$ROOT/scripts/lib/menu-node.sh"
+dx_retire_no_mesh
 # detect-os.sh PRINTS the platform (mac|wsl|linux|unknown) to stdout — it does
 # NOT set an $OS variable. Run it and capture stdout, exactly as the engines do
 # (install-engine.sh / uninstall-engine.sh). Sourcing it and reading $OS tripped
@@ -36,11 +41,11 @@ if [[ "$MODE" == "help" && "$APPLY" -eq 1 ]]; then
     exit 64
 fi
 
+ensure_menu_node
 if ! command -v node >/dev/null 2>&1; then
     log_error "Node.js is required for the interactive menu."
-    log_error "Install the mesh-managed Node (fnm LTS), then re-open a shell:"
-    log_error "  bash setup.sh --non-interactive --bundle languages/node"
-    log_error "Or: MESH_IDENTITY_REPO=… bash setup.sh   # lean first-run also installs languages/node"
+    log_error "Re-run from a TTY so setup can download the private menu runtime:"
+    log_error "  bash setup.sh"
     exit 1
 fi
 

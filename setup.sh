@@ -75,12 +75,6 @@ while [[ $# -gt 0 ]]; do
 done
 # Explicit --bundle list is a headless selection; never open the menu over it.
 [[ "${#CLI_BUNDLES[@]}" -gt 0 ]] && NON_INTERACTIVE=1
-if [[ "${MESH_NO_MESH:-0}" == "1" ]]; then
-    printf '%s\n' \
-        '--no-mesh was removed. setup.sh is DX and does not join identity.' \
-        'For a headless Linux server: setup.sh --server' >&2
-    exit 1
-fi
 # --repair (verify/operational plan §C, via `mesh doctor --fix`): a verify+repair
 # sweep, never the menu. Force non-interactive so the menu is skipped and any
 # unset option falls back to its silent default; the engine repairs only items
@@ -117,10 +111,7 @@ Automation / CI mode:
   DRY_RUN=1 bash setup.sh           print what the engine would do, don't execute
   bash setup.sh --dry-run           same, flag form
   bash setup.sh --list-bundles      list every topic/bundle + default selection
-  bash setup.sh --server            headless Linux DX (explicit; not auto-detected)
-  bash setup.sh --no-mesh           omit membership: mesh bundles from the catalog
-                                    (exports MESH_NO_MESH=1 before the menu);
-                                    headless default is foundation/base only
+  bash setup.sh --server            headless Linux DX. Does not join identity.
   bash setup.sh --bundle T/B        add topic/bundle to the headless selection
                                     (repeatable; implies --non-interactive)
   bash setup.sh --repair            verify+repair installed-but-broken items only
@@ -136,6 +127,7 @@ EOF
 }
 
 if [[ "${SHOW_HELP:-0}" == "1" ]]; then usage; exit 0; fi
+dx_retire_no_mesh
 
 # ─── enumerate manifests + default selection ─────────────────────────────────
 # Default selection = every bundle whose default_selected is not false (required
@@ -190,31 +182,6 @@ emit_all_selections() {
             done
         )
     done
-}
-
-# Abort before apply when the resolved ids contain a forbidden bundle or
-# both sides of a conflicts pair. Prints the bundle id. Mutates nothing.
-dx_guard_selection_args() {
-    no_mesh_active && return 0
-    local hit
-    if hit="$(dx_profile_conflict_hit "$@")"; then
-        printf 'setup.sh: conflict, refusing to apply both: %s\n' "$(printf '%s' "$hit" | tr '\n' ' ')" >&2
-        exit 1
-    fi
-    if hit="$(dx_profile_first_forbidden "$@")"; then
-        printf 'setup.sh: forbidden bundle for %s profile: %s\n' "$(dx_profile_name)" "$hit" >&2
-        exit 1
-    fi
-}
-
-dx_guard_selection_file() {
-    local file="$1" line ids=()
-    [[ -f "$file" ]] || return 0
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
-        ids+=("$line")
-    done < "$file"
-    dx_guard_selection_args ${ids[@]+"${ids[@]}"}
 }
 
 if [[ "$LIST_BUNDLES" == "1" ]]; then
@@ -522,54 +489,8 @@ SELECTIONS_FILE="$SELECTIONS_DIR/selections.list"
 REMOVALS_FILE="$SELECTIONS_DIR/removals.list"
 MENU_DIR="$HERE/scripts/menu"
 
-# Private Node for the workstation menu only. Not a catalog bundle, not fnm,
-# and not exported from shell rc. --server forces non-interactive, so it
-# does not download. A dry-run does not download either.
-ensure_menu_node() {
-    [[ "$(dx_profile_name)" == "workstation" ]] || return 0
-    [[ "${NON_INTERACTIVE:-0}" == "1" ]] && return 0
-    [[ "${DRY_RUN:-0}" == "1" ]] && return 0
-    command -v node >/dev/null 2>&1 && return 0
-    local dest="$HOME/.local/share/mesh/menu-node"
-    if [[ -x "$dest/bin/node" ]]; then
-        export PATH="$dest/bin:$PATH"
-        return 0
-    fi
-    command -v curl >/dev/null 2>&1 || return 0
-    command -v python3 >/dev/null 2>&1 || return 0
-    local ver arch osname tar url tmp
-    ver="$(curl -fsSL --connect-timeout 8 --max-time 30 https://nodejs.org/dist/index.json \
-        | python3 -c 'import json,sys
-rels=json.load(sys.stdin)
-for r in rels:
-    if r.get("lts"):
-        print(r["version"])
-        break')" || return 0
-    [[ -n "$ver" ]] || return 0
-    case "$(uname -s)" in
-        Linux) osname=linux ;;
-        Darwin) osname=darwin ;;
-        *) return 0 ;;
-    esac
-    case "$(uname -m)" in
-        x86_64|amd64) arch=x64 ;;
-        aarch64|arm64) arch=arm64 ;;
-        *) return 0 ;;
-    esac
-    tar="node-${ver}-${osname}-${arch}.tar.gz"
-    url="https://nodejs.org/dist/${ver}/${tar}"
-    tmp="$(mktemp -d)"
-    if ! curl -fsSL --connect-timeout 8 --max-time 120 -o "$tmp/node.tgz" "$url"; then
-        rm -rf "$tmp"
-        return 0
-    fi
-    tar -xzf "$tmp/node.tgz" -C "$tmp" || { rm -rf "$tmp"; return 0; }
-    rm -rf "$dest"
-    mkdir -p "$(dirname "$dest")"
-    mv "$tmp"/node-* "$dest"
-    rm -rf "$tmp"
-    export PATH="$dest/bin:$PATH"
-}
+# shellcheck source=scripts/lib/menu-node.sh
+source "$HERE/scripts/lib/menu-node.sh"
 
 run_menu_if_available() {
     # Propagates the menu's exit status so the caller can tell apart:
@@ -608,8 +529,8 @@ if should_run_menu; then
         # That flag means the operator asked for headless; missing Node must not
         # block personal identity TTY prompts. Use a lean bootstrap selection
         # (foundation + shell + personal) instead of the full default-on fleet.
-        warn "interactive bundle menu unavailable — using lean bootstrap selection (foundation/shell/personal)"
-        warn "re-run bash setup.sh after Node is on PATH to open the full Blink menu"
+        warn "interactive bundle menu unavailable — using the workstation DX default"
+        warn "re-run bash setup.sh to open the Blink menu"
         MESH_LEAN_BOOTSTRAP=1; export MESH_LEAN_BOOTSTRAP
         # selections.list is only rewritten when absent. A stale/synced file would
         # keep MESH_LEAN_BOOTSTRAP inert. When Node itself is missing, clear it
@@ -668,30 +589,8 @@ persist_workstation_dir() {
 }
 persist_workstation_dir
 
-# Identity clone destination for the shell + auto-update. Same upsert as
-# persist_workstation_dir: one MESH_IDENTITY_DIR line, other keys untouched.
-persist_identity_dir() {
-    [[ "$DRY_RUN" == "1" ]] && return 0
-    local config="$SELECTIONS_DIR/config.env"
-    local dir="${MESH_IDENTITY_DIR:-$HOME/mesh-identity}"
-    [[ -n "$dir" ]] || return 0
-    export MESH_IDENTITY_DIR="$dir"
-    mkdir -p "$SELECTIONS_DIR"
-    local tmp; tmp="$(mktemp "$SELECTIONS_DIR/.config.env.XXXXXX")" || return 0
-    {
-        [[ -f "$config" ]] && grep -v '^MESH_IDENTITY_DIR=' "$config"
-        printf 'MESH_IDENTITY_DIR=%q\n' "$dir"
-    } > "$tmp" && mv "$tmp" "$config" || { rm -f "$tmp"; return 0; }
-    info "identity dir persisted: MESH_IDENTITY_DIR=$dir → ${config/#$HOME/\~}"
-}
-persist_identity_dir
-
-# AUTO_UPDATE_REPOS is required by `mesh update`. persist_code_dir /
-# persist_workstation_dir used to CREATE config.env with only those keys, so a
-# fresh install left the array empty and manual `mesh update -o mesh-identity`
-# failed. Seed once (never overwrite a user-edited list). Expanded absolute
-# paths: later CODE_DIR/MESH_*_DIR upserts append, so `$VAR` refs would expand
-# against a stale/empty value. --no-mesh omits identity (no membership clone).
+# AUTO_UPDATE_REPOS is required by `mesh update`. Seed the workstation repo
+# once. Identity is added by `mesh identity enable`, not by DX setup.
 persist_auto_update_repos() {
     [[ "$DRY_RUN" == "1" ]] && return 0
     local config="$SELECTIONS_DIR/config.env"
@@ -700,7 +599,6 @@ persist_auto_update_repos() {
         return 0
     fi
     local ws="${MESH_WORKSTATION_DIR:-$HERE}"
-    local id="${MESH_IDENTITY_DIR:-$HOME/mesh-identity}"
     [[ -n "$ws" ]] || return 0
     local tmp
     tmp="$(mktemp "$SELECTIONS_DIR/.config.env.XXXXXX")" || return 0
@@ -708,9 +606,6 @@ persist_auto_update_repos() {
         [[ -f "$config" ]] && cat "$config"
         printf 'AUTO_UPDATE_REPOS=(\n'
         printf '    %q\n' "$ws"
-        if [[ "${MESH_NO_MESH:-0}" != "1" ]]; then
-            printf '    %q\n' "$id"
-        fi
         printf ')\n'
     } > "$tmp" && mv "$tmp" "$config" || { rm -f "$tmp"; return 0; }
     info "auto-update repos seeded → ${config/#$HOME/\~}"
@@ -838,10 +733,6 @@ set -e
 # (order 30) under the tee pipe; a prompt there is easy to miss, and
 # NON_INTERACTIVE / a missing TTY skips it entirely. Ask once at the end.
 # A skipped/headless lock is a follow-up, not a setup failure.
-if [[ "$DRY_RUN" != "1" && "${MESH_NO_MESH:-0}" != "1" && "$ADOPT_MODE" != "1" ]]; then
-    "$HERE/bin/mesh" secret offer-unlock || true
-fi
-
 banner "summary"
 render_followup_summary
 
