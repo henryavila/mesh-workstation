@@ -397,6 +397,43 @@ assert_eq "$(serve_mutations)" "" \
 assert_contains "$SERVE_OUT" "followup manual" \
     "a Text-only Serve config emits a follow-up"
 
+# The plain-text sentinel is the only non-JSON status classified as empty.
+serve_setup
+run_serve_step
+assert_eq "$SERVE_RC" "0" "a plain 'No serve config' sentinel does not abort the install"
+assert_contains "$(serve_mutations)" "serve --bg --yes --https=8449 8080" \
+    "a plain 'No serve config' sentinel configures Serve normally"
+assert_not_contains "$SERVE_OUT" "followup" \
+    "a plain 'No serve config' sentinel emits no follow-up"
+
+# Surrounding whitespace does not change the sentinel.
+serve_setup
+serve_use_static '  No serve config  '
+run_serve_step
+assert_contains "$(serve_mutations)" "serve --bg --yes --https=8449 8080" \
+    "a whitespace-padded 'No serve config' sentinel configures Serve normally"
+
+# The sentinel inside a JSON handler is content, not an empty status: the
+# config has a foreign Text route and must be preserved.
+serve_setup
+serve_use_static '{"TCP":{"8449":{"HTTPS":true}},"Web":{"host.test.ts.net:8449":{"Handlers":{"/":{"Text":"No serve config"}}}}}'
+run_serve_step
+assert_eq "$SERVE_RC" "0" "a Text handler containing the sentinel does not abort the install"
+assert_eq "$(serve_mutations)" "" \
+    "a Text handler containing the sentinel is never mutated"
+assert_contains "$SERVE_OUT" "followup manual" \
+    "a Text handler containing the sentinel emits a follow-up"
+
+# Plain text only counts as the sentinel when it is the whole trimmed output.
+serve_setup
+serve_use_static 'No serve config here'
+run_serve_step
+assert_eq "$SERVE_RC" "0" "plain text containing the sentinel does not abort the install"
+assert_eq "$(serve_mutations)" "" \
+    "plain text containing the sentinel is never mutated"
+assert_contains "$SERVE_OUT" "followup manual" \
+    "plain text containing the sentinel emits a follow-up"
+
 # Same for a Path handler on a port the installer does not manage.
 serve_setup
 serve_use_static '{"TCP":{"8450":{"HTTPS":true}},"Web":{"host.test.ts.net:8450":{"Handlers":{"/x":{"Path":"/var/www"}}}}}'
