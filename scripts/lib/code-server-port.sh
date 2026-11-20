@@ -69,7 +69,7 @@ PYPORT
 
 # Only migrate the dedicated default HTTPS endpoint, never an unrelated route.
 code_server_managed_serve_matches() {
-    local https_port="${CODE_SERVER_TAILSCALE_HTTPS_PORT:-8449}"
+    local https_port="${CODE_SERVER_TAILSCALE_HTTPS_PORT-8449}"
     TS_STATUS_JSON="$1" python3 -I - "$2" "$https_port" <<'PYSERVE'
 import json, os, sys
 proxy_port, https_port = sys.argv[1], sys.argv[2]
