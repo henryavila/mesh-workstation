@@ -922,14 +922,27 @@ verify_local_only_listener() {
 }
 
 tailscale_serve_state() {
-    local status_out="$1" previous_port="${2:-}" parsed
+    local status_out="$1" previous_port="${2:-}" parsed trimmed have_python=0
 
-    if [[ -z "$status_out" || "$status_out" == *"No serve config"* ]]; then
+    if [[ -z "$status_out" ]]; then
+        printf 'empty\n'
+        return 0
+    fi
+
+    # The textual sentinel counts only for non-JSON output and only when, with
+    # surrounding whitespace removed, it is the whole output. A valid JSON
+    # document never trims to this bare line, so this cannot hide a route;
+    # JSON is classified from its content by the Python below.
+    trimmed="$status_out"
+    trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+    if [[ "$trimmed" == "No serve config" ]]; then
         printf 'empty\n'
         return 0
     fi
 
     if command -v python3 >/dev/null 2>&1; then
+        have_python=1
         if parsed="$(TS_STATUS_JSON="$status_out" python3 - "$CODE_SERVER_PORT" "$CODE_SERVER_TAILSCALE_HTTPS_PORT" "$previous_port" 2>/dev/null <<'PY'
 import json
 import os
@@ -1027,9 +1040,13 @@ PY
         fi
     fi
 
+    # Anything that parsed as JSON was classified by the Python above, from its
+    # content alone. A non-JSON status that is not the exact sentinel is
+    # invalid, and the caller leaves Serve alone; "No serve config here" never
+    # makes the installer overwrite a foreign route.
     # Without python3 the HTTPS port behind a handler cannot be read, so never
     # claim the route is already desired; the caller leaves Serve alone.
-    if printf '%s' "$status_out" | grep -Eq '"Handlers"|"Proxy"'; then
+    if [[ "$have_python" == "0" ]] && printf '%s' "$status_out" | grep -Eq '"Handlers"|"Proxy"'; then
         printf 'other\n'
     else
         printf 'invalid\n'
