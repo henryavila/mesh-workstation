@@ -267,8 +267,16 @@ an explicit full-config rewrite, including password configuration.
 The health check verifies that the listener belongs to the managed LaunchAgent
 or its descendants before configuring Tailscale Serve. An unrelated application
 is never stopped. A competing bind after port selection fails validation; rerun
-the installer to select again. A saved, dedicated Mesh Serve route on HTTPS 443
-can follow the new port; unrelated Serve routes are preserved.
+the installer to select again.
+
+Tailscale Serve publishes code-server on the HTTPS port named by
+`CODE_SERVER_TAILSCALE_HTTPS_PORT`, which defaults to 8449 and stays off 443
+unless you set it explicitly. Publishing on 443 makes Tailscale listen on
+`*:443`, which breaks other local web servers that own 443 on loopback.
+The installer prints the HTTPS URL reported by `tailscale serve status`.
+A saved, dedicated Mesh Serve route on the configured HTTPS port (or on the
+legacy 443 from earlier installs) can follow a new loopback port; unrelated
+Serve routes are preserved.
 
 When the macOS app is installed without CLI integration, Mesh creates
 `~/.local/bin/tailscale`, a wrapper around the app executable with
