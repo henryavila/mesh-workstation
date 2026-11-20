@@ -484,15 +484,15 @@ assert_contains "$SERVE_OUT" "Tailscale Serve already proxies / to 127.0.0.1:808
 serve_json_8449='{"TCP":{"8449":{"HTTPS":true}},"Web":{"host.test.ts.net:8449":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8080"}}}}}'
 serve_json_443='{"TCP":{"443":{"HTTPS":true}},"Web":{"host.test.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8080"}}}}}'
 serve_json_8450='{"TCP":{"8450":{"HTTPS":true}},"Web":{"host.test.ts.net:8450":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8080"}}}}}'
-ASSERT_MSG="managed Serve matcher accepts the configured HTTPS port 8449"
-assert_true "env -u CODE_SERVER_TAILSCALE_HTTPS_PORT bash -c '. \"$ROOT/scripts/lib/code-server-port.sh\"; code_server_managed_serve_matches \"\$1\" 8080' _ '$serve_json_8449'"
-ASSERT_MSG="managed Serve matcher accepts a legacy HTTPS port 443"
-assert_true "code_server_managed_serve_matches '$serve_json_443' 8080"
-ASSERT_MSG="managed Serve matcher rejects an unconfigured Serve port"
-assert_false "code_server_managed_serve_matches '$serve_json_8450' 8080"
-ASSERT_MSG="managed Serve matcher accepts the default when the variable is unset"
-assert_true "env -u CODE_SERVER_TAILSCALE_HTTPS_PORT bash -c '. \"$ROOT/scripts/lib/code-server-port.sh\"; code_server_managed_serve_matches \"\$1\" 8080' _ '$serve_json_8449'"
-ASSERT_MSG="managed Serve matcher does not treat an empty HTTPS port as configured"
-assert_false "CODE_SERVER_TAILSCALE_HTTPS_PORT= bash -c '. \"$ROOT/scripts/lib/code-server-port.sh\"; code_server_managed_serve_matches \"\$1\" 8080' _ '$serve_json_8449'"
+ASSERT_MSG="managed Serve matcher accepts the configured HTTPS port 8449" \
+    assert_true "env -u CODE_SERVER_TAILSCALE_HTTPS_PORT bash -c '. \"$ROOT/scripts/lib/code-server-port.sh\"; code_server_managed_serve_matches \"\$1\" 8080' _ '$serve_json_8449'"
+ASSERT_MSG="managed Serve matcher accepts a legacy HTTPS port 443" \
+    assert_true "code_server_managed_serve_matches '$serve_json_443' 8080"
+ASSERT_MSG="managed Serve matcher rejects an unconfigured Serve port" \
+    assert_false "code_server_managed_serve_matches '$serve_json_8450' 8080"
+ASSERT_MSG="managed Serve matcher accepts the default when the variable is unset" \
+    assert_true "env -u CODE_SERVER_TAILSCALE_HTTPS_PORT bash -c '. \"$ROOT/scripts/lib/code-server-port.sh\"; code_server_managed_serve_matches \"\$1\" 8080' _ '$serve_json_8449'"
+ASSERT_MSG="managed Serve matcher does not treat an empty HTTPS port as configured" \
+    assert_false "CODE_SERVER_TAILSCALE_HTTPS_PORT= bash -c '. \"$ROOT/scripts/lib/code-server-port.sh\"; code_server_managed_serve_matches \"\$1\" 8080' _ '$serve_json_8449'"
 
 summary
