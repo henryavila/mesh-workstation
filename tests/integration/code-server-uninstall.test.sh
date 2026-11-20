@@ -171,8 +171,10 @@ echo "═══ Tailscale Serve port detection (behavioural) ═══"
 # legacy 443; any other Serve port is preserved.
 serve_case() {
     local name="$1" tcp_port="$2" expect_reset="$3" https_arg="${4-__unset__}"
+    local status_json="${5-}"
     local case_dir="$SANDBOX/serve-$name"
     local case_home="$case_dir/home" case_bin="$case_dir/bin" case_calls="$case_dir/calls.log"
+    [[ -n "$status_json" ]] || status_json="{\"TCP\": {\"$tcp_port\": {\"HTTPS\": true}}, \"Web\": {\"code-server.test.ts.net:$tcp_port\": {\"Handlers\": {\"/\": {\"Proxy\": \"http://127.0.0.1:8080\"}}}}}"
     mkdir -p "$case_bin" "$case_home/.local/bin" "$case_home/.local/state/code-server" \
         "$case_home/.config/code-server" "$case_home/Library/LaunchAgents"
     printf 'bind-addr: 127.0.0.1:8080\n' > "$case_home/.config/code-server/config.yaml"
@@ -189,7 +191,7 @@ SH
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "serve" && "\${2:-}" == "status" && "\${3:-}" == "--json" ]]; then
     cat <<'JSON'
-{"TCP": {"$tcp_port": {"HTTPS": true}}, "Web": {"code-server.test.ts.net:$tcp_port": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8080"}}}}}
+$status_json
 JSON
     exit 0
 fi
@@ -212,9 +214,15 @@ SH
         NON_INTERACTIVE=1
         CODE_SERVER_LABEL="com.tester.code-server"
     )
-    [[ "$https_arg" == "__unset__" ]] || envv+=(CODE_SERVER_TAILSCALE_HTTPS_PORT="$https_arg")
+    # The unset case must not inherit the variable from whoever runs the tests.
+    local -a runenv=(env)
+    if [[ "$https_arg" == "__unset__" ]]; then
+        runenv+=(-u CODE_SERVER_TAILSCALE_HTTPS_PORT)
+    else
+        envv+=(CODE_SERVER_TAILSCALE_HTTPS_PORT="$https_arg")
+    fi
     out="$(
-        env "${envv[@]}" bash -c '. "$1"; uninstall' _ "$SCRIPT" 2>&1
+        "${runenv[@]}" "${envv[@]}" bash -c '. "$1"; uninstall' _ "$SCRIPT" 2>&1
     )"
     rc=$?
     assert_eq "$rc" "0" "$name: uninstall exits 0"
@@ -236,5 +244,9 @@ serve_case "custom-9443" "9443" "1" "9443"
 serve_case "custom-9443-not-configured" "9443" "0"
 # An explicitly empty value must not silently widen what counts as managed.
 serve_case "empty-8449-not-configured" "8449" "0" ""
+# A handler without Proxy next to the code-server root proxy makes the config
+# mixed: `serve reset` would remove that handler too, so it must not run.
+serve_case "root-plus-text-8449" "8449" "0" "__unset__" \
+    '{"TCP":{"8449":{"HTTPS":true}},"Web":{"code-server.test.ts.net:8449":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8080"},"/other":{"Text":"existing website"}}}}}'
 
 summary
