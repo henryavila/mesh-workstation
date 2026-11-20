@@ -93,25 +93,6 @@ except Exception:
     print("unknown")
     sys.exit(0)
 
-web = data.get("Web") if isinstance(data, dict) else {}
-tcp = data.get("TCP") if isinstance(data, dict) else {}
-proxies = []
-
-if isinstance(web, dict):
-    for host, cfg in web.items():
-        if not isinstance(cfg, dict):
-            continue
-        handlers = cfg.get("Handlers")
-        if not isinstance(handlers, dict):
-            continue
-        for path, handler in handlers.items():
-            if isinstance(handler, dict) and handler.get("Proxy"):
-                proxies.append((host, path, handler.get("Proxy")))
-
-if not proxies:
-    print("empty")
-    sys.exit(0)
-
 # The dedicated Mesh config lives on the configured HTTPS port; 443 is
 # accepted for machines installed before Serve was pinned to that port.
 accepted = {"443"}
@@ -119,15 +100,48 @@ configured = os.environ.get("CODE_SERVER_TAILSCALE_HTTPS_PORT", "8449")
 if configured.isdigit():
     accepted.add(configured)
 
-tcp_ok = not tcp
-if isinstance(tcp, dict) and len(tcp) == 1:
-    tcp_port = next(iter(tcp))
-    v = tcp[tcp_port]
-    tcp_ok = tcp_port in accepted and isinstance(v, dict) and v.get("HTTPS") is True and len(v) == 1
 
-if len(proxies) == 1 and proxies[0][1] == "/" and proxies[0][2] == want and tcp_ok:
+def dedicated(data):
+    """The strict whole-config test shared with the installer and port library."""
+    if not isinstance(data, dict):
+        return False
+    if set(data) - {"TCP", "Web", "AllowFunnel"}:
+        return False
+    tcp = data.get("TCP")
+    if not isinstance(tcp, dict) or len(tcp) != 1:
+        return False
+    tcp_port, entry = next(iter(tcp.items()))
+    if tcp_port not in accepted or entry != {"HTTPS": True}:
+        return False
+    web = data.get("Web")
+    if not isinstance(web, dict) or len(web) != 1:
+        return False
+    host, config = next(iter(web.items()))
+    if not host.endswith(":" + tcp_port):
+        return False
+    if config != {"Handlers": {"/": {"Proxy": want}}}:
+        return False
+    funnel = data.get("AllowFunnel")
+    return not (isinstance(funnel, dict) and any(funnel.values()))
+
+
+def proxies(obj, found):
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key == "Handlers" and isinstance(value, dict):
+                for handler in value.values():
+                    if isinstance(handler, dict) and handler.get("Proxy"):
+                        found.append(handler.get("Proxy"))
+            proxies(value, found)
+    elif isinstance(obj, list):
+        for value in obj:
+            proxies(value, found)
+    return found
+
+
+if dedicated(data):
     print("dedicated")
-elif any(proxy == want for _, _, proxy in proxies):
+elif want in proxies(data, []):
     print("mixed")
 else:
     print("other")
@@ -986,25 +1000,26 @@ if https_port != "443":
         print("legacy")
         sys.exit(0)
 
-found_handlers = False
-
-
-def walk(obj):
-    global found_handlers
+def has_handlers(obj):
+    """True when any Handlers entry exists, whatever its handler kinds."""
     if isinstance(obj, dict):
         for key, value in obj.items():
-            if key == "Handlers" and isinstance(value, dict):
-                for handler in value.values():
-                    if isinstance(handler, dict) and handler.get("Proxy"):
-                        found_handlers = True
-            walk(value)
+            if key == "Handlers":
+                return True
+            if has_handlers(value):
+                return True
     elif isinstance(obj, list):
         for value in obj:
-            walk(value)
+            if has_handlers(value):
+                return True
+    return False
 
 
-walk(data)
-print("other" if found_handlers else "empty")
+# `empty` means there is nothing to preserve: no Handlers entry of any kind and
+# no TCP entry. Anything else that is not desired/legacy (Text, Path, Redirect,
+# a stray port, ...) is `other`, so the caller never overwrites it.
+tcp = data.get("TCP") if isinstance(data, dict) else None
+print("other" if has_handlers(data) or bool(tcp) else "empty")
 PY
 )"; then
             printf '%s\n' "$parsed"
