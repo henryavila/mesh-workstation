@@ -80,7 +80,7 @@ _code_server_uninstall_clear_tailscale_serve() {
     fi
 
     state="$(CODE_SERVER_PORT="$port" \
-        CODE_SERVER_TAILSCALE_HTTPS_PORT="${CODE_SERVER_TAILSCALE_HTTPS_PORT:-8449}" \
+        CODE_SERVER_TAILSCALE_HTTPS_PORT="${CODE_SERVER_TAILSCALE_HTTPS_PORT-8449}" \
         TS_STATUS_JSON="$status" python3 - <<'PY'
 import json
 import os
@@ -368,7 +368,7 @@ install() {
     : "${CODE_SERVER_PORT:=8080}"
     : "${CODE_SERVER_LABEL:=com.${USER}.code-server}"
     : "${CODE_SERVER_TAILSCALE_SERVE:=1}"
-    : "${CODE_SERVER_TAILSCALE_HTTPS_PORT:=8449}"
+    : "${CODE_SERVER_TAILSCALE_HTTPS_PORT=8449}"
     : "${CODE_SERVER_INSTALL_PREFIX:=$HOME/.local}"
     : "${CODE_SERVER_INSTALL_METHOD:=standalone}"
     : "${CODE_SERVER_UPGRADE:=0}"
@@ -908,7 +908,7 @@ verify_local_only_listener() {
 }
 
 tailscale_serve_state() {
-    local status_out="$1" parsed
+    local status_out="$1" previous_port="${2:-}" parsed
 
     if [[ -z "$status_out" || "$status_out" == *"No serve config"* ]]; then
         printf 'empty\n'
@@ -916,40 +916,95 @@ tailscale_serve_state() {
     fi
 
     if command -v python3 >/dev/null 2>&1; then
-        if parsed="$(TS_STATUS_JSON="$status_out" python3 - "$CODE_SERVER_PORT" 2>/dev/null <<'PY'
+        if parsed="$(TS_STATUS_JSON="$status_out" python3 - "$CODE_SERVER_PORT" "$CODE_SERVER_TAILSCALE_HTTPS_PORT" "$previous_port" 2>/dev/null <<'PY'
 import json
 import os
 import sys
 
-port = sys.argv[1]
-want = f"http://127.0.0.1:{port}"
-data = json.loads(os.environ["TS_STATUS_JSON"])
+port, https_port, previous_port = sys.argv[1:4]
+want = "http://127.0.0.1:" + port
+
+
+def root_proxy_on(data, https):
+    """True when a host on `https` maps / to the current code-server port."""
+    if not isinstance(data, dict):
+        return False
+    tcp = data.get("TCP")
+    entry = tcp.get(https) if isinstance(tcp, dict) else None
+    if not (isinstance(entry, dict) and entry.get("HTTPS") is True):
+        return False
+    web = data.get("Web")
+    if not isinstance(web, dict):
+        return False
+    for host, config in web.items():
+        if not host.endswith(":" + https) or not isinstance(config, dict):
+            continue
+        handlers = config.get("Handlers")
+        handler = handlers.get("/") if isinstance(handlers, dict) else None
+        if isinstance(handler, dict) and handler.get("Proxy") == want:
+            return True
+    return False
+
+
+def dedicated_on(data, https, target):
+    """The dedicated-route test shared with code_server_managed_serve_matches."""
+    if not isinstance(data, dict) or set(data) - {"TCP", "Web", "AllowFunnel"}:
+        return False
+    tcp = data.get("TCP")
+    if not isinstance(tcp, dict) or len(tcp) != 1:
+        return False
+    tcp_port, entry = next(iter(tcp.items()))
+    if tcp_port != https or entry != {"HTTPS": True}:
+        return False
+    web = data.get("Web")
+    if not isinstance(web, dict) or len(web) != 1:
+        return False
+    host, config = next(iter(web.items()))
+    if not host.endswith(":" + tcp_port):
+        return False
+    if config != {"Handlers": {"/": {"Proxy": "http://127.0.0.1:" + target}}}:
+        return False
+    funnel = data.get("AllowFunnel")
+    return not (isinstance(funnel, dict) and any(funnel.values()))
+
+
+try:
+    data = json.loads(os.environ["TS_STATUS_JSON"])
+except (TypeError, ValueError):
+    print("invalid")
+    sys.exit(0)
+
+if root_proxy_on(data, https_port):
+    print("desired")
+    sys.exit(0)
+
+# A dedicated route on legacy 443 is migrated only when its proxy targets the
+# current code-server port or the one saved before the loopback port moved.
+if https_port != "443":
+    targets = [port] + ([previous_port] if previous_port.isdigit() else [])
+    if any(dedicated_on(data, "443", target) for target in targets):
+        print("legacy")
+        sys.exit(0)
+
 found_handlers = False
-root_desired = False
+
 
 def walk(obj):
-    global found_handlers, root_desired
+    global found_handlers
     if isinstance(obj, dict):
-        handlers = obj.get("Handlers")
-        if isinstance(handlers, dict):
-            for path, handler in handlers.items():
-                if isinstance(handler, dict) and handler.get("Proxy"):
-                    found_handlers = True
-                    if path == "/" and handler.get("Proxy") == want:
-                        root_desired = True
-        for value in obj.values():
+        for key, value in obj.items():
+            if key == "Handlers" and isinstance(value, dict):
+                for handler in value.values():
+                    if isinstance(handler, dict) and handler.get("Proxy"):
+                        found_handlers = True
             walk(value)
     elif isinstance(obj, list):
         for value in obj:
             walk(value)
 
+
 walk(data)
-if root_desired:
-    print("desired")
-elif found_handlers:
-    print("other")
-else:
-    print("empty")
+print("other" if found_handlers else "empty")
 PY
 )"; then
             printf '%s\n' "$parsed"
@@ -957,9 +1012,9 @@ PY
         fi
     fi
 
-    if printf '%s' "$status_out" | grep -qF "http://127.0.0.1:${CODE_SERVER_PORT}"; then
-        printf 'desired\n'
-    elif printf '%s' "$status_out" | grep -Eq '"Handlers"|"Proxy"'; then
+    # Without python3 the HTTPS port behind a handler cannot be read, so never
+    # claim the route is already desired; the caller leaves Serve alone.
+    if printf '%s' "$status_out" | grep -Eq '"Handlers"|"Proxy"'; then
         printf 'other\n'
     else
         printf 'invalid\n'
@@ -983,7 +1038,7 @@ maybe_configure_tailscale_serve() {
     # `tailscale serve --bg` without --https publishes on HTTPS 443, where a
     # local web server (e.g. Yerd) already listens on loopback. Pin Serve to
     # an explicit HTTPS port so the default never touches 443.
-    CODE_SERVER_TAILSCALE_HTTPS_PORT="${CODE_SERVER_TAILSCALE_HTTPS_PORT:-8449}"
+    CODE_SERVER_TAILSCALE_HTTPS_PORT="${CODE_SERVER_TAILSCALE_HTTPS_PORT=8449}"
     if [[ ! "$CODE_SERVER_TAILSCALE_HTTPS_PORT" =~ ^[0-9]{1,5}$ ]] \
         || (( 10#$CODE_SERVER_TAILSCALE_HTTPS_PORT < 1 || 10#$CODE_SERVER_TAILSCALE_HTTPS_PORT > 65535 )); then
         followup manual "CODE_SERVER_TAILSCALE_HTTPS_PORT must be an integer between 1 and 65535 (got '$CODE_SERVER_TAILSCALE_HTTPS_PORT'); leaving Tailscale Serve unchanged. Set it to the HTTPS port Serve should use (default 8449)."
@@ -1004,28 +1059,60 @@ maybe_configure_tailscale_serve() {
         return 0
     fi
 
-    local status_out status_rc state
+    local status_out status_rc state previous_port
     status_out="$(PATH="${CODE_SERVER_INSTALL_PREFIX}/bin:${CODE_SERVER_EXTRA_PATH}" tailscale serve status --json 2>&1)" || status_rc=$?
     status_rc="${status_rc:-0}"
     if [[ "$status_rc" -ne 0 ]]; then
         followup manual "Could not read Tailscale Serve status (rc=$status_rc); leaving its configuration unchanged."
         return 0
     fi
-    state="$(tailscale_serve_state "$status_out")"
+    previous_port="$(cat "$CODE_SERVER_STATE_DIR/serve-port" 2>/dev/null || true)"
+    [[ "$previous_port" =~ ^[0-9]+$ ]] || previous_port=""
+    state="$(tailscale_serve_state "$status_out" "$previous_port")"
 
     case "$state" in
         desired)
-            ok "Tailscale Serve already proxies / to 127.0.0.1:$CODE_SERVER_PORT"
+            ok "Tailscale Serve already proxies / to 127.0.0.1:$CODE_SERVER_PORT (HTTPS $CODE_SERVER_TAILSCALE_HTTPS_PORT)"
             printf '%s\n' "$CODE_SERVER_PORT" > "$CODE_SERVER_STATE_DIR/serve-port"
             print_tailscale_code_server_url
             return 0
             ;;
         empty)
             ;;
+        legacy)
+            # Machines installed before Serve was pinned to a dedicated HTTPS
+            # port still route code-server through 443. Move the route first and
+            # turn 443 off only once the new route is confirmed.
+            info "moving the managed Tailscale Serve route from HTTPS 443 to $CODE_SERVER_TAILSCALE_HTTPS_PORT"
+            if ! PATH="${CODE_SERVER_INSTALL_PREFIX}/bin:${CODE_SERVER_EXTRA_PATH}" \
+                tailscale serve --bg --yes --https="$CODE_SERVER_TAILSCALE_HTTPS_PORT" "$CODE_SERVER_PORT"; then
+                followup manual "Could not publish the code-server route on HTTPS $CODE_SERVER_TAILSCALE_HTTPS_PORT; leaving the legacy HTTPS 443 route unchanged. Check 'tailscale serve status'."
+                return 0
+            fi
+            status_out="$(PATH="${CODE_SERVER_INSTALL_PREFIX}/bin:${CODE_SERVER_EXTRA_PATH}" tailscale serve status --json 2>&1 || true)"
+            state="$(tailscale_serve_state "$status_out" "$previous_port")"
+            if [[ "$state" != "desired" ]]; then
+                followup manual "Tailscale Serve did not report the code-server route on HTTPS $CODE_SERVER_TAILSCALE_HTTPS_PORT; leaving the legacy HTTPS 443 route unchanged. Review 'tailscale serve status'."
+                return 0
+            fi
+            if ! PATH="${CODE_SERVER_INSTALL_PREFIX}/bin:${CODE_SERVER_EXTRA_PATH}" \
+                tailscale serve --https=443 off; then
+                followup manual "The code-server route is on HTTPS $CODE_SERVER_TAILSCALE_HTTPS_PORT, but 'tailscale serve --https=443 off' failed; turn the legacy HTTPS 443 route off manually."
+                return 0
+            fi
+            status_out="$(PATH="${CODE_SERVER_INSTALL_PREFIX}/bin:${CODE_SERVER_EXTRA_PATH}" tailscale serve status --json 2>&1 || true)"
+            state="$(tailscale_serve_state "$status_out" "$previous_port")"
+            if [[ "$state" == "desired" ]]; then
+                ok "Tailscale Serve proxies / to 127.0.0.1:$CODE_SERVER_PORT (HTTPS $CODE_SERVER_TAILSCALE_HTTPS_PORT)"
+                printf '%s\n' "$CODE_SERVER_PORT" > "$CODE_SERVER_STATE_DIR/serve-port"
+                print_tailscale_code_server_url
+            else
+                followup manual "The legacy HTTPS 443 route was turned off, but the code-server route on HTTPS $CODE_SERVER_TAILSCALE_HTTPS_PORT was not confirmed. Review 'tailscale serve status'."
+            fi
+            return 0
+            ;;
         other)
-            local previous_port
-            previous_port="$(cat "$CODE_SERVER_STATE_DIR/serve-port" 2>/dev/null || true)"
-            if [[ "$previous_port" =~ ^[0-9]+$ ]] && code_server_managed_serve_matches "$status_out" "$previous_port"; then
+            if [[ -n "$previous_port" ]] && code_server_managed_serve_matches "$status_out" "$previous_port"; then
                 info "updating the managed Tailscale Serve proxy to port $CODE_SERVER_PORT"
             else
                 followup manual "Tailscale Serve already has handlers; not overwriting automatically. Review 'tailscale serve status' and add code-server manually if appropriate."
@@ -1042,9 +1129,9 @@ maybe_configure_tailscale_serve() {
     PATH="${CODE_SERVER_INSTALL_PREFIX}/bin:${CODE_SERVER_EXTRA_PATH}" tailscale serve --bg --yes --https="$CODE_SERVER_TAILSCALE_HTTPS_PORT" "$CODE_SERVER_PORT"
 
     status_out="$(PATH="${CODE_SERVER_INSTALL_PREFIX}/bin:${CODE_SERVER_EXTRA_PATH}" tailscale serve status --json 2>&1 || true)"
-    state="$(tailscale_serve_state "$status_out")"
+    state="$(tailscale_serve_state "$status_out" "$previous_port")"
     if [[ "$state" == "desired" ]]; then
-        ok "Tailscale Serve proxies / to 127.0.0.1:$CODE_SERVER_PORT"
+        ok "Tailscale Serve proxies / to 127.0.0.1:$CODE_SERVER_PORT (HTTPS $CODE_SERVER_TAILSCALE_HTTPS_PORT)"
         printf '%s\n' "$CODE_SERVER_PORT" > "$CODE_SERVER_STATE_DIR/serve-port"
         print_tailscale_code_server_url
     else
