@@ -143,8 +143,14 @@ assert_pattern_present "$INSTALL" 'tailscale serve status --json' \
     "installer preflights existing Tailscale Serve config"
 assert_pattern_present "$INSTALL" 'No serve config' \
     "preflight treats 'No serve config' as empty state"
-assert_pattern_present "$INSTALL" 'tailscale serve --bg --yes "\$CODE_SERVER_PORT"' \
-    "installer uses non-interactive tailscale serve command"
+assert_pattern_present "$INSTALL" 'CODE_SERVER_TAILSCALE_HTTPS_PORT:=8449' \
+    "installer defaults the Serve HTTPS port to 8449, never 443"
+assert_pattern_present "$INSTALL" 'tailscale serve --bg --yes --https="\$CODE_SERVER_TAILSCALE_HTTPS_PORT" "\$CODE_SERVER_PORT"' \
+    "installer publishes Serve on the configured HTTPS port"
+assert_pattern_absent "$INSTALL" 'tailscale serve --bg --yes "\$CODE_SERVER_PORT"' \
+    "installer never publishes Serve on the default HTTPS 443"
+assert_pattern_present "$INSTALL" 'log in, then run: tailscale serve --bg --yes --https=\$CODE_SERVER_TAILSCALE_HTTPS_PORT \$CODE_SERVER_PORT' \
+    "manual Serve hint uses the same configured HTTPS port"
 assert_pattern_present "$INSTALL" 'code-server URL:' \
     "installer prints the Tailscale URL when Serve is active"
 assert_pattern_present "$INSTALL" 'code-server uninstall: tailscale serve reset failed' \
@@ -156,5 +162,83 @@ assert_pattern_present "$VERIFY" 'lsof -nP -iTCP:"\$CODE_SERVER_PORT" -sTCP:LIST
     "verify checks the actual listener"
 assert_pattern_present "$VERIFY" 'loopback-only on 127\.0\.0\.1' \
     "verify fails if listener is not loopback-only"
+
+
+echo
+echo "═══ Tailscale Serve HTTPS port (behaviour) ═══"
+
+SERVE_SANDBOX="$(mktemp -d -t code-server-serve.XXXXXX)"
+cleanup_serve() { rm -rf "$SERVE_SANDBOX"; }
+trap cleanup_serve EXIT
+
+SERVE_BIN="$SERVE_SANDBOX/bin"
+SERVE_HOME="$SERVE_SANDBOX/home"
+SERVE_CALLS="$SERVE_SANDBOX/calls.log"
+mkdir -p "$SERVE_BIN" "$SERVE_HOME/.local/state/code-server"
+cat > "$SERVE_BIN/tailscale" <<'SH'
+#!/bin/bash
+printf '%s\n' "$*" >> "${CALLS:?}"
+if [[ "${1:-}" == "status" ]]; then
+    exit 0
+fi
+if [[ "${1:-}" == "serve" && "${2:-}" == "status" ]]; then
+    printf 'No serve config\n'
+    exit 0
+fi
+exit 0
+SH
+chmod +x "$SERVE_BIN/tailscale"
+
+# The installer nests its Serve helpers inside install(); lift the two we
+# exercise into a sourceable file so the step can run without the installer.
+SERVE_HELPERS="$SERVE_SANDBOX/serve-helpers.sh"
+{
+    awk '/^tailscale_serve_state\(\) \{/{copy=1} copy{print} copy&&/^\}$/{copy=0}' "$INSTALL"
+    awk '/^maybe_configure_tailscale_serve\(\) \{/{copy=1} copy{print} copy&&/^\}$/{copy=0}' "$INSTALL"
+} > "$SERVE_HELPERS"
+assert_file_contains "$SERVE_HELPERS" "maybe_configure_tailscale_serve" \
+    "Serve step helper is available for behavioural coverage"
+
+run_serve_step() {
+    : > "$SERVE_CALLS"
+    SERVE_OUT="$(
+        HOME="$SERVE_HOME" USER="tester" MESH_WORKSTATION_DIR="$ROOT" \
+        PATH="$SERVE_BIN:$PATH" CALLS="$SERVE_CALLS" \
+        CODE_SERVER_TAILSCALE_SERVE=1 \
+        CODE_SERVER_PORT=8080 \
+        CODE_SERVER_INSTALL_PREFIX="$SERVE_HOME/.local" \
+        CODE_SERVER_EXTRA_PATH="$SERVE_BIN" \
+        CODE_SERVER_STATE_DIR="$SERVE_HOME/.local/state/code-server" \
+        CODE_SERVER_TAILSCALE_HTTPS_PORT="${1:-}" \
+        bash -c '. "$1/scripts/lib/log.sh"; . "$2"; mesh_tailscale_cli() { return 0; }; maybe_configure_tailscale_serve' _ "$ROOT" "$SERVE_HELPERS" 2>&1
+    )"
+    SERVE_RC=$?
+}
+
+run_serve_step
+assert_eq "$SERVE_RC" "0" "Serve step succeeds with the default HTTPS port"
+assert_contains "$(cat "$SERVE_CALLS")" "serve --bg --yes --https=8449 8080" \
+    "Serve step publishes on HTTPS 8449 by default"
+
+run_serve_step "abc"
+assert_eq "$SERVE_RC" "0" "Serve step with an invalid HTTPS port does not abort the install"
+assert_contains "$SERVE_OUT" "CODE_SERVER_TAILSCALE_HTTPS_PORT" \
+    "invalid HTTPS port follow-up names the variable"
+assert_not_contains "$(cat "$SERVE_CALLS")" "serve" \
+    "invalid HTTPS port never calls tailscale serve"
+
+# Migration matcher: a managed config on the configured HTTPS port (or legacy
+# 443) may be updated; any other Serve port is left alone.
+# shellcheck source=/dev/null
+. "$ROOT/scripts/lib/code-server-port.sh"
+serve_json_8449='{"TCP":{"8449":{"HTTPS":true}},"Web":{"host.test.ts.net:8449":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8080"}}}}}'
+serve_json_443='{"TCP":{"443":{"HTTPS":true}},"Web":{"host.test.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8080"}}}}}'
+serve_json_8450='{"TCP":{"8450":{"HTTPS":true}},"Web":{"host.test.ts.net:8450":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8080"}}}}}'
+ASSERT_MSG="managed Serve matcher accepts the configured HTTPS port 8449"
+assert_true "code_server_managed_serve_matches '$serve_json_8449' 8080"
+ASSERT_MSG="managed Serve matcher accepts a legacy HTTPS port 443"
+assert_true "code_server_managed_serve_matches '$serve_json_443' 8080"
+ASSERT_MSG="managed Serve matcher rejects an unconfigured Serve port"
+assert_false "code_server_managed_serve_matches '$serve_json_8450' 8080"
 
 summary
