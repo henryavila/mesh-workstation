@@ -271,14 +271,19 @@ the installer to select again.
 
 Tailscale Serve publishes code-server on the HTTPS port named by
 `CODE_SERVER_TAILSCALE_HTTPS_PORT`, which defaults to 8449 when the variable is
-unset. Serve listens on 443 only when you set the variable to 443 explicitly;
-publishing there makes Tailscale listen on `*:443`, which breaks other local web
-servers that own 443 on loopback. The installer prints the HTTPS URL reported by
-`tailscale serve status`. On a machine whose Serve config is the dedicated Mesh
-code-server route on 443, a rerun moves that route to the configured port and
-only then turns the 443 route off, keeping 443 if the new route cannot be
-confirmed. Unrelated Serve routes are preserved, and an empty or invalid value
-leaves Serve unchanged.
+unset. The installer publishes on HTTPS 443 only when you set the variable to
+443; publishing there makes Tailscale listen on `*:443`, which breaks other
+local web servers that own 443 on loopback. The installer prints the HTTPS URL
+reported by `tailscale serve status`.
+
+On a machine whose Serve config is the dedicated Mesh code-server route on 443,
+a rerun moves that route to the configured port and only then turns the 443
+route off. An existing 443 route stays when the new route cannot be confirmed,
+when turning the 443 route off fails, when the Serve config is not the dedicated
+code-server route (any unrelated handler, host, or port), or when the installer
+cannot read the Serve status or the configured HTTPS port value is empty or
+invalid. Serve routes of any kind that are not the dedicated code-server route
+are preserved.
 
 When the macOS app is installed without CLI integration, Mesh creates
 `~/.local/bin/tailscale`, a wrapper around the app executable with
