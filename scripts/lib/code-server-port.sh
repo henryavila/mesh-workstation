@@ -69,18 +69,29 @@ PYPORT
 
 # Only migrate the dedicated default HTTPS endpoint, never an unrelated route.
 code_server_managed_serve_matches() {
-    TS_STATUS_JSON="$1" python3 -I - "$2" <<'PYSERVE'
+    local https_port="${CODE_SERVER_TAILSCALE_HTTPS_PORT:-8449}"
+    TS_STATUS_JSON="$1" python3 -I - "$2" "$https_port" <<'PYSERVE'
 import json, os, sys
+proxy_port, https_port = sys.argv[1], sys.argv[2]
+# The dedicated Mesh config lives on the configured HTTPS port; 443 is
+# accepted for machines installed before Serve was pinned to that port.
+accepted = {'443'}
+if https_port.isdigit():
+    accepted.add(https_port)
 try:
     data = json.loads(os.environ['TS_STATUS_JSON'])
     assert isinstance(data, dict)
     assert not (set(data) - {'TCP', 'Web', 'AllowFunnel'})
-    assert data.get('TCP') == {'443': {'HTTPS': True}}
+    tcp = data.get('TCP')
+    assert isinstance(tcp, dict) and len(tcp) == 1
+    tcp_port = next(iter(tcp))
+    assert tcp_port in accepted
+    assert tcp[tcp_port] == {'HTTPS': True}
     web = data.get('Web')
     assert isinstance(web, dict) and len(web) == 1
     host, config = next(iter(web.items()))
-    assert host.endswith(':443')
-    assert config == {'Handlers': {'/': {'Proxy': 'http://127.0.0.1:' + sys.argv[1]}}}
+    assert host.endswith(':' + tcp_port)
+    assert config == {'Handlers': {'/': {'Proxy': 'http://127.0.0.1:' + proxy_port}}}
     assert not any(data.get('AllowFunnel', {}).values())
 except (AssertionError, ValueError, TypeError, AttributeError):
     sys.exit(1)

@@ -79,7 +79,9 @@ _code_server_uninstall_clear_tailscale_serve() {
         return "$required"
     fi
 
-    state="$(CODE_SERVER_PORT="$port" TS_STATUS_JSON="$status" python3 - <<'PY'
+    state="$(CODE_SERVER_PORT="$port" \
+        CODE_SERVER_TAILSCALE_HTTPS_PORT="${CODE_SERVER_TAILSCALE_HTTPS_PORT:-8449}" \
+        TS_STATUS_JSON="$status" python3 - <<'PY'
 import json
 import os
 import sys
@@ -110,10 +112,18 @@ if not proxies:
     print("empty")
     sys.exit(0)
 
+# The dedicated Mesh config lives on the configured HTTPS port; 443 is
+# accepted for machines installed before Serve was pinned to that port.
+accepted = {"443"}
+configured = os.environ.get("CODE_SERVER_TAILSCALE_HTTPS_PORT", "8449")
+if configured.isdigit():
+    accepted.add(configured)
+
 tcp_ok = not tcp
-if isinstance(tcp, dict) and set(tcp.keys()) == {"443"}:
-    v = tcp.get("443")
-    tcp_ok = isinstance(v, dict) and v.get("HTTPS") is True and len(v) == 1
+if isinstance(tcp, dict) and len(tcp) == 1:
+    tcp_port = next(iter(tcp))
+    v = tcp[tcp_port]
+    tcp_ok = tcp_port in accepted and isinstance(v, dict) and v.get("HTTPS") is True and len(v) == 1
 
 if len(proxies) == 1 and proxies[0][1] == "/" and proxies[0][2] == want and tcp_ok:
     print("dedicated")
@@ -358,6 +368,7 @@ install() {
     : "${CODE_SERVER_PORT:=8080}"
     : "${CODE_SERVER_LABEL:=com.${USER}.code-server}"
     : "${CODE_SERVER_TAILSCALE_SERVE:=1}"
+    : "${CODE_SERVER_TAILSCALE_HTTPS_PORT:=8449}"
     : "${CODE_SERVER_INSTALL_PREFIX:=$HOME/.local}"
     : "${CODE_SERVER_INSTALL_METHOD:=standalone}"
     : "${CODE_SERVER_UPGRADE:=0}"
@@ -969,6 +980,16 @@ print_tailscale_code_server_url() {
 maybe_configure_tailscale_serve() {
     [[ "$CODE_SERVER_TAILSCALE_SERVE" == "1" ]] || return 0
 
+    # `tailscale serve --bg` without --https publishes on HTTPS 443, where a
+    # local web server (e.g. Yerd) already listens on loopback. Pin Serve to
+    # an explicit HTTPS port so the default never touches 443.
+    CODE_SERVER_TAILSCALE_HTTPS_PORT="${CODE_SERVER_TAILSCALE_HTTPS_PORT:-8449}"
+    if [[ ! "$CODE_SERVER_TAILSCALE_HTTPS_PORT" =~ ^[0-9]{1,5}$ ]] \
+        || (( 10#$CODE_SERVER_TAILSCALE_HTTPS_PORT < 1 || 10#$CODE_SERVER_TAILSCALE_HTTPS_PORT > 65535 )); then
+        followup manual "CODE_SERVER_TAILSCALE_HTTPS_PORT must be an integer between 1 and 65535 (got '$CODE_SERVER_TAILSCALE_HTTPS_PORT'); leaving Tailscale Serve unchanged. Set it to the HTTPS port Serve should use (default 8449)."
+        return 0
+    fi
+
     if ! mesh_tailscale_cli; then
         followup manual "Tailscale CLI is unavailable; install or launch Tailscale.app and re-run this installation."
         return 0
@@ -979,7 +1000,7 @@ maybe_configure_tailscale_serve() {
     fi
 
     if ! PATH="${CODE_SERVER_INSTALL_PREFIX}/bin:${CODE_SERVER_EXTRA_PATH}" tailscale status --self >/dev/null 2>&1; then
-        followup manual "CODE_SERVER_TAILSCALE_SERVE=1, but this node is not authenticated in Tailscale. Launch Tailscale, log in, then run: tailscale serve --bg --yes $CODE_SERVER_PORT"
+        followup manual "CODE_SERVER_TAILSCALE_SERVE=1, but this node is not authenticated in Tailscale. Launch Tailscale, log in, then run: tailscale serve --bg --yes --https=$CODE_SERVER_TAILSCALE_HTTPS_PORT $CODE_SERVER_PORT"
         return 0
     fi
 
@@ -1017,8 +1038,8 @@ maybe_configure_tailscale_serve() {
             ;;
     esac
 
-    info "configuring Tailscale Serve for code-server on local port $CODE_SERVER_PORT"
-    PATH="${CODE_SERVER_INSTALL_PREFIX}/bin:${CODE_SERVER_EXTRA_PATH}" tailscale serve --bg --yes "$CODE_SERVER_PORT"
+    info "configuring Tailscale Serve for code-server on local port $CODE_SERVER_PORT (HTTPS $CODE_SERVER_TAILSCALE_HTTPS_PORT)"
+    PATH="${CODE_SERVER_INSTALL_PREFIX}/bin:${CODE_SERVER_EXTRA_PATH}" tailscale serve --bg --yes --https="$CODE_SERVER_TAILSCALE_HTTPS_PORT" "$CODE_SERVER_PORT"
 
     status_out="$(PATH="${CODE_SERVER_INSTALL_PREFIX}/bin:${CODE_SERVER_EXTRA_PATH}" tailscale serve status --json 2>&1 || true)"
     state="$(tailscale_serve_state "$status_out")"
