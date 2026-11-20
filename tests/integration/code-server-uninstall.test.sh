@@ -170,7 +170,7 @@ echo "═══ Tailscale Serve port detection (behavioural) ═══"
 # Uninstall may reset only the dedicated Mesh config on that port or on the
 # legacy 443; any other Serve port is preserved.
 serve_case() {
-    local name="$1" tcp_port="$2" expect_reset="$3" https_port="${4:-}"
+    local name="$1" tcp_port="$2" expect_reset="$3" https_arg="${4-__unset__}"
     local case_dir="$SANDBOX/serve-$name"
     local case_home="$case_dir/home" case_bin="$case_dir/bin" case_calls="$case_dir/calls.log"
     mkdir -p "$case_bin" "$case_home/.local/bin" "$case_home/.local/state/code-server" \
@@ -203,16 +203,18 @@ SH
     chmod +x "$case_bin"/*
 
     local out rc
+    local -a envv=(
+        HOME="$case_home"
+        USER="tester"
+        MESH_WORKSTATION_DIR="$ROOT"
+        PATH="$case_bin:$PATH"
+        CALLS="$case_calls"
+        NON_INTERACTIVE=1
+        CODE_SERVER_LABEL="com.tester.code-server"
+    )
+    [[ "$https_arg" == "__unset__" ]] || envv+=(CODE_SERVER_TAILSCALE_HTTPS_PORT="$https_arg")
     out="$(
-        HOME="$case_home" \
-        USER="tester" \
-        MESH_WORKSTATION_DIR="$ROOT" \
-        PATH="$case_bin:$PATH" \
-        CALLS="$case_calls" \
-        NON_INTERACTIVE=1 \
-        CODE_SERVER_LABEL="com.tester.code-server" \
-        CODE_SERVER_TAILSCALE_HTTPS_PORT="${https_port:-8449}" \
-        bash -c '. "$1"; uninstall' _ "$SCRIPT" 2>&1
+        env "${envv[@]}" bash -c '. "$1"; uninstall' _ "$SCRIPT" 2>&1
     )"
     rc=$?
     assert_eq "$rc" "0" "$name: uninstall exits 0"
@@ -232,5 +234,7 @@ serve_case "legacy-443" "443" "1"
 serve_case "other-8450" "8450" "0"
 serve_case "custom-9443" "9443" "1" "9443"
 serve_case "custom-9443-not-configured" "9443" "0"
+# An explicitly empty value must not silently widen what counts as managed.
+serve_case "empty-8449-not-configured" "8449" "0" ""
 
 summary

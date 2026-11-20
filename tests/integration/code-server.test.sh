@@ -143,8 +143,10 @@ assert_pattern_present "$INSTALL" 'tailscale serve status --json' \
     "installer preflights existing Tailscale Serve config"
 assert_pattern_present "$INSTALL" 'No serve config' \
     "preflight treats 'No serve config' as empty state"
-assert_pattern_present "$INSTALL" 'CODE_SERVER_TAILSCALE_HTTPS_PORT:=8449' \
-    "installer defaults the Serve HTTPS port to 8449, never 443"
+assert_pattern_present "$INSTALL" ': "\$\{CODE_SERVER_TAILSCALE_HTTPS_PORT=8449\}"' \
+    "installer defaults the Serve HTTPS port to 8449 only when it is unset"
+assert_pattern_absent "$INSTALL" 'CODE_SERVER_TAILSCALE_HTTPS_PORT:-8449' \
+    "an explicitly empty Serve HTTPS port never falls back to 8449"
 assert_pattern_present "$INSTALL" 'tailscale serve --bg --yes --https="\$CODE_SERVER_TAILSCALE_HTTPS_PORT" "\$CODE_SERVER_PORT"' \
     "installer publishes Serve on the configured HTTPS port"
 assert_pattern_absent "$INSTALL" 'tailscale serve --bg --yes "\$CODE_SERVER_PORT"' \
@@ -153,6 +155,8 @@ assert_pattern_present "$INSTALL" 'log in, then run: tailscale serve --bg --yes 
     "manual Serve hint uses the same configured HTTPS port"
 assert_pattern_present "$INSTALL" 'code-server URL:' \
     "installer prints the Tailscale URL when Serve is active"
+assert_pattern_present "$INSTALL" 'tailscale serve --https=443 off' \
+    "installer turns the legacy HTTPS 443 route off after moving it"
 assert_pattern_present "$INSTALL" 'code-server uninstall: tailscale serve reset failed' \
     "tailscale serve reset is scoped to uninstall of a dedicated Serve config"
 
@@ -174,15 +178,54 @@ trap cleanup_serve EXIT
 SERVE_BIN="$SERVE_SANDBOX/bin"
 SERVE_HOME="$SERVE_SANDBOX/home"
 SERVE_CALLS="$SERVE_SANDBOX/calls.log"
+SERVE_ROUTES="$SERVE_SANDBOX/routes"
+SERVE_STATIC_JSON="$SERVE_SANDBOX/static.json"
+SERVE_IGNORE_MUTATIONS=0
 mkdir -p "$SERVE_BIN" "$SERVE_HOME/.local/state/code-server"
+# Stub `tailscale`: records argv and models Serve state as one route per line
+# ("https_port local_port"). SERVE_STATIC_JSON freezes the reported status so a
+# test can prove the installer refuses to turn 443 off without confirmation.
 cat > "$SERVE_BIN/tailscale" <<'SH'
 #!/bin/bash
+# The installer invokes tailscale with a narrowed PATH; restore the system
+# directories so the stub can use cat/mv for its state model.
+PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 printf '%s\n' "$*" >> "${CALLS:?}"
 if [[ "${1:-}" == "status" ]]; then
     exit 0
 fi
-if [[ "${1:-}" == "serve" && "${2:-}" == "status" ]]; then
-    printf 'No serve config\n'
+[[ "${1:-}" == "serve" ]] || exit 0
+if [[ "${2:-}" == "status" ]]; then
+    if [[ -s "${SERVE_STATIC_JSON:-}" ]]; then
+        cat "$SERVE_STATIC_JSON"
+    elif [[ -s "${SERVE_ROUTES:-}" ]]; then
+        read -r https_port local_port < "$SERVE_ROUTES"
+        printf '{"TCP":{"%s":{"HTTPS":true}},"Web":{"host.test.ts.net:%s":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:%s"}}}}}' \
+            "$https_port" "$https_port" "$local_port"
+    else
+        printf 'No serve config\n'
+    fi
+    exit 0
+fi
+[[ "${SERVE_IGNORE_MUTATIONS:-0}" == "1" ]] && exit 0
+if [[ "${2:-}" == "--bg" ]]; then
+    https_port="" local_port=""
+    for arg in "$@"; do
+        case "$arg" in
+            --https=*) https_port="${arg#--https=}" ;;
+            [0-9]*) local_port="$arg" ;;
+        esac
+    done
+    printf '%s %s\n' "$https_port" "$local_port" > "${SERVE_ROUTES:?}"
+    exit 0
+fi
+if [[ "${2:-}" == "--https=443" && "${3:-}" == "off" ]]; then
+    : > "${SERVE_ROUTES:?}.tmp"
+    while read -r https_port local_port; do
+        [[ "$https_port" == "443" ]] && continue
+        printf '%s %s\n' "$https_port" "$local_port" >> "${SERVE_ROUTES}.tmp"
+    done < "${SERVE_ROUTES}"
+    mv "${SERVE_ROUTES}.tmp" "${SERVE_ROUTES}"
     exit 0
 fi
 exit 0
@@ -199,33 +242,129 @@ SERVE_HELPERS="$SERVE_SANDBOX/serve-helpers.sh"
 assert_file_contains "$SERVE_HELPERS" "maybe_configure_tailscale_serve" \
     "Serve step helper is available for behavioural coverage"
 
-run_serve_step() {
+serve_mutations() {
+    grep -E '^serve ' "${SERVE_CALLS:-/dev/null}" 2>/dev/null | grep -v '^serve status' | tr '\n' '|' || true
+}
+
+# serve_setup [initial routes | none] — reset calls, Serve state and the saved
+# serve-port file. ``serve_use_static JSON`` pins the status the stub reports.
+serve_setup() {
+    local initial="${1:-none}"
     : > "$SERVE_CALLS"
+    : > "$SERVE_ROUTES"
+    : > "$SERVE_STATIC_JSON"
+    SERVE_IGNORE_MUTATIONS=0
+    rm -f "$SERVE_HOME/.local/state/code-server/serve-port"
+    [[ "$initial" == "none" ]] || printf '%s\n' "$initial" > "$SERVE_ROUTES"
+}
+serve_use_static() { printf '%s\n' "$1" > "$SERVE_STATIC_JSON"; }
+
+run_serve_step() {
+    local port="${1-__unset__}"
+    : > "$SERVE_CALLS"
+    local -a envv=(
+        HOME="$SERVE_HOME" USER="tester" MESH_WORKSTATION_DIR="$ROOT"
+        PATH="$SERVE_BIN:$PATH" CALLS="$SERVE_CALLS"
+        SERVE_ROUTES="$SERVE_ROUTES" SERVE_STATIC_JSON="$SERVE_STATIC_JSON"
+        SERVE_IGNORE_MUTATIONS="$SERVE_IGNORE_MUTATIONS"
+        CODE_SERVER_TAILSCALE_SERVE=1
+        CODE_SERVER_PORT=8080
+        CODE_SERVER_INSTALL_PREFIX="$SERVE_HOME/.local"
+        CODE_SERVER_EXTRA_PATH="$SERVE_BIN"
+        CODE_SERVER_STATE_DIR="$SERVE_HOME/.local/state/code-server"
+    )
+    [[ "$port" == "__unset__" ]] || envv+=(CODE_SERVER_TAILSCALE_HTTPS_PORT="$port")
     SERVE_OUT="$(
-        HOME="$SERVE_HOME" USER="tester" MESH_WORKSTATION_DIR="$ROOT" \
-        PATH="$SERVE_BIN:$PATH" CALLS="$SERVE_CALLS" \
-        CODE_SERVER_TAILSCALE_SERVE=1 \
-        CODE_SERVER_PORT=8080 \
-        CODE_SERVER_INSTALL_PREFIX="$SERVE_HOME/.local" \
-        CODE_SERVER_EXTRA_PATH="$SERVE_BIN" \
-        CODE_SERVER_STATE_DIR="$SERVE_HOME/.local/state/code-server" \
-        CODE_SERVER_TAILSCALE_HTTPS_PORT="${1:-}" \
-        bash -c '. "$1/scripts/lib/log.sh"; . "$2"; mesh_tailscale_cli() { return 0; }; maybe_configure_tailscale_serve' _ "$ROOT" "$SERVE_HELPERS" 2>&1
+        env "${envv[@]}" bash -c '
+            . "$1/scripts/lib/log.sh"
+            . "$1/scripts/lib/code-server-port.sh"
+            . "$2"
+            mesh_tailscale_cli() { return 0; }
+            followup() { printf "followup %s: %s\n" "$1" "$2"; }
+            print_tailscale_code_server_url() { :; }
+            maybe_configure_tailscale_serve
+        ' _ "$ROOT" "$SERVE_HELPERS" 2>&1
     )"
     SERVE_RC=$?
 }
 
+serve_setup
 run_serve_step
 assert_eq "$SERVE_RC" "0" "Serve step succeeds with the default HTTPS port"
 assert_contains "$(cat "$SERVE_CALLS")" "serve --bg --yes --https=8449 8080" \
     "Serve step publishes on HTTPS 8449 by default"
+assert_not_contains "$(serve_mutations)" "--https=443 off" \
+    "a fresh install never turns 443 off"
 
-run_serve_step "abc"
-assert_eq "$SERVE_RC" "0" "Serve step with an invalid HTTPS port does not abort the install"
-assert_contains "$SERVE_OUT" "CODE_SERVER_TAILSCALE_HTTPS_PORT" \
-    "invalid HTTPS port follow-up names the variable"
-assert_not_contains "$(cat "$SERVE_CALLS")" "serve" \
-    "invalid HTTPS port never calls tailscale serve"
+# An explicitly empty HTTPS port is invalid, exactly like "abc", "0", "65536".
+for invalid in "" "abc" "0" "65536"; do
+    label="${invalid:-<empty>}"
+    serve_setup "443 8080"
+    run_serve_step "$invalid"
+    assert_eq "$SERVE_RC" "0" "invalid HTTPS port $label does not abort the install"
+    assert_contains "$SERVE_OUT" "CODE_SERVER_TAILSCALE_HTTPS_PORT" \
+        "invalid HTTPS port $label follow-up names the variable"
+    assert_eq "$(cat "$SERVE_CALLS")" "" \
+        "invalid HTTPS port $label never calls tailscale"
+done
+
+# Legacy dedicated 443 route with the backend already matching: move it to the
+# configured port and only then turn 443 off.
+serve_setup "443 8080"
+printf '8080\n' > "$SERVE_HOME/.local/state/code-server/serve-port"
+run_serve_step
+assert_eq "$SERVE_RC" "0" "legacy 443 migration succeeds"
+assert_eq "$(serve_mutations)" "serve --bg --yes --https=8449 8080|serve --https=443 off|" \
+    "legacy 443 is moved to 8449 before it is turned off"
+assert_contains "$SERVE_OUT" "Tailscale Serve proxies / to 127.0.0.1:8080" \
+    "legacy migration reports the final Serve state as OK"
+assert_eq "$(cat "$SERVE_ROUTES")" "8449 8080" \
+    "legacy migration leaves only the 8449 route"
+assert_eq "$(cat "$SERVE_HOME/.local/state/code-server/serve-port")" "8080" \
+    "legacy migration records the served loopback port"
+
+# Same migration without the serve-port state file older installs may lack.
+serve_setup "443 8080"
+run_serve_step
+assert_eq "$SERVE_RC" "0" "legacy 443 migration succeeds without a serve-port file"
+assert_eq "$(serve_mutations)" "serve --bg --yes --https=8449 8080|serve --https=443 off|" \
+    "legacy 443 without a serve-port file is still moved to 8449"
+assert_eq "$(cat "$SERVE_ROUTES")" "8449 8080" \
+    "legacy migration without state file leaves only the 8449 route"
+
+# Any additional handler makes the config unrelated: leave it untouched.
+serve_setup
+serve_use_static '{"TCP":{"443":{"HTTPS":true}},"Web":{"host.test.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8080"},"/other":{"Proxy":"http://127.0.0.1:9999"}}}}}'
+run_serve_step
+assert_eq "$SERVE_RC" "0" "a mixed 443 config does not abort the install"
+assert_eq "$(serve_mutations)" "" \
+    "a mixed 443 config is never mutated"
+assert_contains "$SERVE_OUT" "followup manual" \
+    "a mixed 443 config emits a follow-up"
+assert_contains "$SERVE_OUT" "Tailscale Serve already has handlers" \
+    "the follow-up explains that Serve was left alone"
+
+# Without a confirmed new route the installer must leave 443 alone.
+serve_setup
+serve_use_static '{"TCP":{"443":{"HTTPS":true}},"Web":{"host.test.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8080"}}}}}'
+SERVE_IGNORE_MUTATIONS=1
+run_serve_step
+assert_eq "$SERVE_RC" "0" "an unconfirmed migration does not abort the install"
+assert_contains "$(serve_mutations)" "serve --bg --yes --https=8449 8080" \
+    "the unconfirmed migration still tries the configured HTTPS port"
+assert_not_contains "$(serve_mutations)" "--https=443 off" \
+    "443 is not turned off until the new route is confirmed"
+assert_contains "$SERVE_OUT" "followup manual" \
+    "an unconfirmed migration emits a follow-up"
+
+# Explicit 443 is the desired port: nothing to migrate, nothing turned off.
+serve_setup "443 8080"
+run_serve_step "443"
+assert_eq "$SERVE_RC" "0" "explicit HTTPS 443 is accepted"
+assert_eq "$(serve_mutations)" "" \
+    "explicit HTTPS 443 does not mutate Serve"
+assert_contains "$SERVE_OUT" "Tailscale Serve already proxies / to 127.0.0.1:8080 (HTTPS 443)" \
+    "explicit HTTPS 443 is reported as desired on 443"
 
 # Migration matcher: a managed config on the configured HTTPS port (or legacy
 # 443) may be updated; any other Serve port is left alone.
@@ -240,5 +379,9 @@ ASSERT_MSG="managed Serve matcher accepts a legacy HTTPS port 443"
 assert_true "code_server_managed_serve_matches '$serve_json_443' 8080"
 ASSERT_MSG="managed Serve matcher rejects an unconfigured Serve port"
 assert_false "code_server_managed_serve_matches '$serve_json_8450' 8080"
+ASSERT_MSG="managed Serve matcher accepts the default when the variable is unset"
+assert_true "env -u CODE_SERVER_TAILSCALE_HTTPS_PORT bash -c '. \"$ROOT/scripts/lib/code-server-port.sh\"; code_server_managed_serve_matches \"\$1\" 8080' _ '$serve_json_8449'"
+ASSERT_MSG="managed Serve matcher does not treat an empty HTTPS port as configured"
+assert_false "CODE_SERVER_TAILSCALE_HTTPS_PORT= bash -c '. \"$ROOT/scripts/lib/code-server-port.sh\"; code_server_managed_serve_matches \"\$1\" 8080' _ '$serve_json_8449'"
 
 summary
